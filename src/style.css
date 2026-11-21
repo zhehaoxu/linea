@@ -1,0 +1,61 @@
+:root {
+  --bg: #f5f6f9;
+  --dot: #d9dce5;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-solid: #ffffff;
+  --line: #e7e9ef;
+  --line-strong: #dcdfe8;
+  --ink: #2c3140;
+  --ink-soft: #6a7183;
+  --ink-faint: #9ba2b2;
+  --accent: #6c79dc;
+  --accent-soft: #eef0fc;
+  --accent-line: #d9ddf8;
+  --accent-ink: #505cb8;
+  --signal: #d99b52;
+  --signal-soft: #fdf3e4;
+  --shadow-soft:
+    0 10px 30px rgba(30, 40, 70, 0.07), 0 1px 2px rgba(30, 40, 70, 0.05);
+
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Segoe UI', sans-serif;
+  color: var(--ink);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+}
