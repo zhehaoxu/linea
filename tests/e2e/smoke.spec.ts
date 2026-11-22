@@ -1,14 +1,22 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
+import { TEMPLATES } from '../../src/circuit/templates'
+import type { CircuitData } from '../../src/circuit/persist'
+
+const HALF_ADDER = JSON.stringify(TEMPLATES.find(template => template.id === 'half-adder')?.data ?? {
+  nodes: [],
+  wires: [],
+} satisfies CircuitData)
 
 test.beforeEach(async ({ page }) => {
-  // 每个测试首次加载时清空存储；sessionStorage 标记让 reload 保留刚写入的数据
-  await page.addInitScript(() => {
+  // 首次加载写入半加器种子（初始画布为空）；sessionStorage 标记让 reload 保留刚写入的数据
+  await page.addInitScript(seed => {
     if (sessionStorage.getItem('linea-e2e-ready') !== '1') {
       localStorage.clear()
+      localStorage.setItem('linea.circuit.v1', seed)
       sessionStorage.setItem('linea-e2e-ready', '1')
     }
-  })
+  }, HALF_ADDER)
   await page.goto('/')
   await expect(page.locator('.stage .node').first()).toBeVisible()
 })
@@ -485,8 +493,8 @@ test('import rejects invalid files and keeps the canvas', async ({ page }) => {
 })
 
 test('focused nodes activate with Enter and Space', async ({ page }) => {
-  const n1 = page.locator('.stage .node[data-id="n1"]')
-  const n2 = page.locator('.stage .node[data-id="n2"]')
+  const n1 = page.locator('.stage .node[data-id="a"]')
+  const n2 = page.locator('.stage .node[data-id="b"]')
 
   await expect(n1.locator('.knob')).toHaveAttribute('cx', '30.5')
   await n1.focus()
@@ -500,4 +508,13 @@ test('focused nodes activate with Enter and Space', async ({ page }) => {
   await expect(n2.locator('.knob')).toHaveAttribute('cx', '30.5')
   await expect(n2.locator('.selected-outline')).toHaveCount(1)
   await expect(n1.locator('.selected-outline')).toHaveCount(0)
+})
+
+test('a fresh visit starts with an empty canvas', async ({ page }) => {
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await expect(page.locator('.stage .node')).toHaveCount(0)
+  await expect(page.locator('.stage .wire')).toHaveCount(0)
+  await expect(page.locator('.topbar .zoom span')).toHaveText('100%')
 })

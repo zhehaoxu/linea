@@ -468,31 +468,12 @@ export function cycleClockFreq(id: string) {
   recordHistory()
 }
 
-function seedDemo() {
-  const a = addNode('switch', 60, 70)
-  const b = addNode('switch', 60, 190)
-  const gateXor = addNode('xor', 300, 40)
-  const gateAnd = addNode('and', 300, 170)
-  const lampSum = addNode('lamp', 510, 50)
-  const lampCarry = addNode('lamp', 510, 175)
-  a.value = 1
-  connect({ nodeId: a.id, port: 'out' }, { nodeId: gateXor.id, port: 'a' })
-  connect({ nodeId: b.id, port: 'out' }, { nodeId: gateXor.id, port: 'b' })
-  connect({ nodeId: a.id, port: 'out' }, { nodeId: gateAnd.id, port: 'a' })
-  connect({ nodeId: b.id, port: 'out' }, { nodeId: gateAnd.id, port: 'b' })
-  connect({ nodeId: gateXor.id, port: 'out' }, { nodeId: lampSum.id, port: 'a' })
-  connect({ nodeId: gateAnd.id, port: 'out' }, { nodeId: lampCarry.id, port: 'a' })
-  circuit.selection = null
-}
-
 const stored = loadStoredCircuit()
 if (stored) {
   circuit.nodes = cloneNodes(stored.nodes)
   circuit.wires = cloneWires(stored.wires)
   circuit.groups = cloneGroups(stored.groups ?? [])
   syncSequences()
-} else {
-  seedDemo()
 }
 past = []
 future = []
