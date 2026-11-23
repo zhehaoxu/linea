@@ -196,11 +196,11 @@ const frame = computed(() => {
         :height="spec.height"
         rx="8"
       />
-      <path class="clk-mark" d="M0 34L6 38L0 42" />
-      <text class="label" x="7" y="18">D</text>
+      <path class="clk-mark" d="M4 34L10 38L4 42" />
+      <text class="label" x="4" y="18">D</text>
       <text class="label" x="48" y="20">Q</text>
       <text class="label" x="48" y="44">Q</text>
-      <path class="label-bar" d="M47 36H54" />
+      <path class="label-bar" d="M48 34H56" />
     </template>
 
     <template v-else-if="node.type === 'lamp'">
