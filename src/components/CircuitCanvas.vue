@@ -645,6 +645,8 @@ function onSvgUp(ev: PointerEvent) {
 
 function onWheel(ev: WheelEvent) {
   ev.preventDefault()
+  // 仅组合键缩放，避免普通滚动误触；触控板捏合会带上 ctrlKey
+  if (!ev.metaKey && !ev.ctrlKey) return
   closeMenu()
   const rect = stage.value?.getBoundingClientRect()
   if (!rect) return
