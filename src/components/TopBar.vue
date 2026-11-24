@@ -182,13 +182,15 @@ const redoTip = computed(() => t('topbar.redo', { shiftMod: shiftModLabel }))
 }
 
 .live {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
   display: inline-flex;
-  flex: none;
   align-items: center;
   gap: 6px;
   height: 26px;
   padding: 0 10px;
-  margin: 0 2px;
   font-size: 11.5px;
   color: #6f8a63;
   background: #f1f7ee;
