@@ -8,6 +8,7 @@ const isMac =
 
 export const modLabel = isMac ? '⌘' : 'Ctrl+'
 export const shiftModLabel = isMac ? '⇧⌘' : 'Ctrl+Shift+'
+export const shiftLabel = isMac ? '⇧' : 'Shift+'
 
 const LOCALE_KEY = 'linea.locale.v1'
 
@@ -19,6 +20,7 @@ const MESSAGES = {
   'menu.ungroup': { zh: '解组', en: 'Ungroup' },
   'menu.collapse': { zh: '折叠', en: 'Collapse' },
   'menu.expand': { zh: '展开', en: 'Expand' },
+  'menu.unfold': { zh: '取消折叠', en: 'Unfold' },
   'menu.rename': { zh: '重命名', en: 'Rename' },
   'menu.copy': { zh: '复制', en: 'Copy' },
   'menu.cut': { zh: '剪切', en: 'Cut' },

@@ -30,7 +30,7 @@ import {
 } from '../circuit/store'
 import { NODE_SPECS, nodeFrame, portPointOf, textMetrics, wirePath } from '../circuit/specs'
 import { advance, createRuntime, simulate, type Simulation } from '../circuit/simulate'
-import { t, modLabel } from '../i18n'
+import { t, modLabel, shiftLabel } from '../i18n'
 import type {
   BasicNodeType,
   Bit,
@@ -106,6 +106,7 @@ type MenuIcon =
   | 'ungroup'
   | 'collapse'
   | 'expand'
+  | 'unfold'
   | 'rename'
   | 'cut'
   | 'copy'
@@ -157,9 +158,7 @@ const renameTarget = computed<CircuitFold | null>(() => {
   return (
     circuit.folds.find(
       fold =>
-        fold.collapsed &&
-        fold.nodes.length === selected.size &&
-        fold.nodes.every(id => selected.has(id)),
+        fold.nodes.length === selected.size && fold.nodes.every(id => selected.has(id)),
     ) ?? null
   )
 })
@@ -199,8 +198,9 @@ const menuItems = computed<MenuItem[]>(() => {
     },
     {
       id: 'collapse',
-      label: unfolding ? t('menu.expand') : t('menu.collapse'),
-      icon: unfolding ? 'expand' : 'collapse',
+      label: unfolding ? t('menu.unfold') : t('menu.collapse'),
+      icon: unfolding ? 'unfold' : 'collapse',
+      shortcut: `${shiftLabel}F`,
       disabled: !canCollapse,
     },
     {
@@ -916,6 +916,13 @@ function onKey(ev: KeyboardEvent) {
     selectAll()
     return
   }
+  if (ev.shiftKey && !ev.metaKey && !ev.ctrlKey && !ev.altKey && ev.key.toLowerCase() === 'f') {
+    ev.preventDefault()
+    const fold = renameTarget.value
+    if (fold) unfoldFold(fold.id)
+    else toggleSelectionCollapse()
+    return
+  }
   if (ev.key === 'Enter' || ev.code === 'Space') {
     const id = (ev.target as Element | null)?.closest?.('.node')?.getAttribute('data-id')
     if (id) {
@@ -1200,6 +1207,7 @@ interface FoldBox extends GroupFrame {
   id: string
   nodes: string[]
   selected: boolean
+  label?: string
 }
 
 const foldBoxes = computed<FoldBox[]>(() => {
@@ -1215,6 +1223,7 @@ const foldBoxes = computed<FoldBox[]>(() => {
       ...frame,
       nodes: ids,
       selected: ids.every(id => isNodeSelected(id)),
+      ...(fold.label ? { label: fold.label } : {}),
     })
   }
   return boxes
@@ -1274,22 +1283,41 @@ const collapsedBlockById = computed(
 const renameBox = computed(() => {
   const current = renaming.value
   if (!current) return null
-  const block = collapsedBlockById.value.get(current.id)
-  if (!block) return null
   const zoom = circuit.view.zoom
+  const block = collapsedBlockById.value.get(current.id)
+  if (block) {
+    return {
+      left: circuit.view.x + (block.x + 10) * zoom,
+      top: circuit.view.y + (block.y + (block.h - 28) / 2) * zoom,
+      width: (block.w - 20) * zoom,
+      height: 28 * zoom,
+      fontSize: 12 * zoom,
+      borderRadius: 7 * zoom,
+      textAlign: 'center',
+    }
+  }
+  const frame = foldBoxes.value.find(item => item.id === current.id)
+  if (!frame) return null
   return {
-    left: circuit.view.x + (block.x + 10) * zoom,
-    top: circuit.view.y + (block.y + (block.h - 28) / 2) * zoom,
-    width: (block.w - 20) * zoom,
-    height: 28 * zoom,
-    fontSize: 12 * zoom,
-    borderRadius: 7 * zoom,
+    left: circuit.view.x + (frame.x + 20) * zoom,
+    top: circuit.view.y + (frame.y + 2) * zoom,
+    width: (frame.w - 44) * zoom,
+    height: 20 * zoom,
+    fontSize: 11 * zoom,
+    borderRadius: 6 * zoom,
+    textAlign: 'center',
   }
 })
 
 function blockCaption(block: CollapsedBlock): string {
   const caption = block.label ?? t('group.collapsed', { count: block.count })
   return caption.length > 12 ? `${caption.slice(0, 11)}…` : caption
+}
+
+function frameCaption(fold: FoldBox): string {
+  const label = fold.label ?? ''
+  const max = Math.max(3, Math.floor((fold.w - 64) / 6.2))
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label
 }
 
 const sim = ref<Simulation | null>(null)
@@ -1643,6 +1671,13 @@ defineExpose({
             rx="14"
             vector-effect="non-scaling-stroke"
           />
+          <text
+            v-if="fold.label && renaming?.id !== fold.id"
+            class="fold-label"
+            :x="fold.x + fold.w / 2"
+            :y="fold.y + 14"
+            text-anchor="middle"
+          >{{ frameCaption(fold) }}</text>
           <g
             class="fold-toggle"
             role="button"
@@ -1714,6 +1749,7 @@ defineExpose({
         height: `${renameBox.height}px`,
         fontSize: `${renameBox.fontSize}px`,
         borderRadius: `${renameBox.borderRadius}px`,
+        textAlign: renameBox.textAlign as 'left' | 'center',
       }"
       @pointerdown.stop
       @keydown.stop="onRenameKey"
@@ -1760,6 +1796,10 @@ defineExpose({
                 <template v-else-if="item.icon === 'expand'">
                   <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
                   <path d="M12 7.5v9M7.5 12h9" />
+                </template>
+                <template v-else-if="item.icon === 'unfold'">
+                  <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
+                  <path d="M9.5 14.5 6 18M6 18h3.4M6 18v-3.4M14.5 9.5 18 6M18 6h-3.4M18 6v3.4" />
                 </template>
                 <template v-else-if="item.icon === 'rename'">
                   <path d="M4.5 19.5h3.8l10-10a2.1 2.1 0 0 0-3-3l-10 10v3Z" />
@@ -1911,6 +1951,15 @@ defineExpose({
   fill: rgba(74, 156, 138, 0.075);
   stroke: #4a9c8a;
   stroke-width: 1.4;
+}
+
+.fold-label {
+  fill: #3f8d7c;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .fold-toggle,
