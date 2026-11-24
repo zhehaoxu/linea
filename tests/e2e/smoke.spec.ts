@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { TEMPLATES } from '../../src/circuit/templates'
 import type { CircuitData } from '../../src/circuit/persist'
@@ -7,6 +7,17 @@ const HALF_ADDER = JSON.stringify(TEMPLATES.find(template => template.id === 'ha
   nodes: [],
   wires: [],
 } satisfies CircuitData)
+
+async function createFold(page: Page, nodes: Locator, indexes: number[]) {
+  await nodes.nth(indexes[0]).click()
+  for (const index of indexes.slice(1)) await nodes.nth(index).click({ modifiers: ['Shift'] })
+  await nodes.nth(indexes[0]).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '折叠', exact: true }).click()
+}
+
+async function collapseFoldFrame(page: Page) {
+  await page.locator('.fold-toggle').click()
+}
 
 test.beforeEach(async ({ page }) => {
   // 首次加载写入半加器种子（初始画布为空）；sessionStorage 标记让 reload 保留刚写入的数据
@@ -91,6 +102,9 @@ test('context menu groups and ungroups with the keyboard', async ({ page }) => {
   await expect(menu).toBeVisible()
   await expect(groupItem).toBeFocused()
 
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menuitem', { name: '折叠', exact: true })).toBeFocused()
+  await expect(page.getByRole('menuitem', { name: '重命名', exact: true })).toBeDisabled()
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('menuitem', { name: '剪切' })).toBeFocused()
   await page.keyboard.press('End')
@@ -217,6 +231,271 @@ test('group frame drag moves the group, isolated node drag moves alone', async (
   expect(Math.abs((otherAfter?.y ?? 0) - otherBefore.y)).toBeLessThan(1)
 })
 
+test('frames a fold, collapses it into a block, and unfolds back to a multi-selection', async ({
+  page,
+}) => {
+  const nodes = page.locator('.stage .node')
+  const wires = page.locator('.stage .wire')
+  const frame = page.locator('.fold-box')
+  const block = page.locator('.collapsed-block')
+  const menu = page.getByRole('menu', { name: '画布操作' })
+  const initialNodes = await nodes.count()
+  const initialWires = await wires.count()
+
+  await createFold(page, nodes, [2, 4])
+  await expect(menu).toBeHidden()
+
+  await expect(frame).toHaveCount(1)
+  await expect(block).toHaveCount(0)
+  await expect(nodes).toHaveCount(initialNodes)
+  await expect(wires).toHaveCount(initialWires)
+  await expect(page.locator('.group-box')).toHaveCount(0)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+  expect(await page.locator('.fold-frame').evaluate(el => getComputedStyle(el).strokeDasharray)).not.toBe('none')
+
+  await collapseFoldFrame(page)
+  await expect(frame).toHaveCount(0)
+  await expect(block).toHaveCount(1)
+  await expect(nodes).toHaveCount(initialNodes - 2)
+  await expect(wires).toHaveCount(initialWires - 1)
+  await expect(page.locator('.group-box')).toHaveCount(0)
+
+  const box = await block.boundingBox()
+  if (!box) throw new Error('collapsed block missing')
+  expect(box.width).toBeLessThan(220)
+  expect(box.height).toBeLessThan(120)
+
+  await page.locator('.card-toggle').click()
+  await expect(block).toHaveCount(0)
+  await expect(frame).toHaveCount(1)
+  await expect(nodes).toHaveCount(initialNodes)
+  await expect(wires).toHaveCount(initialWires)
+  await expect(page.locator('.group-box')).toHaveCount(0)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+
+  await nodes.nth(2).click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: '展开', exact: true })).toBeEnabled()
+  await page.keyboard.press('Escape')
+
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+  await block.click({ button: 'right' })
+  const expandItem = page.getByRole('menuitem', { name: '展开', exact: true })
+  await expect(expandItem).toBeEnabled()
+  await expandItem.click()
+  await expect(menu).toBeHidden()
+  await expect(block).toHaveCount(0)
+  await expect(frame).toHaveCount(0)
+  await expect(nodes).toHaveCount(initialNodes)
+  await expect(wires).toHaveCount(initialWires)
+  await expect(page.locator('.group-box')).toHaveCount(0)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+
+  await nodes.nth(2).click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: '折叠', exact: true })).toBeEnabled()
+  await page.keyboard.press('Escape')
+
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(block).toHaveCount(1)
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect(block).toHaveCount(0)
+
+  await createFold(page, nodes, [2, 4])
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+  await page.waitForFunction(() =>
+    (localStorage.getItem('linea.circuit.v1') ?? '').includes('"collapsed": true'),
+  )
+  await page.reload()
+
+  await expect(block).toHaveCount(1)
+  await expect(nodes).toHaveCount(initialNodes - 2)
+
+  await block.focus()
+  await page.keyboard.press('Enter')
+  await expect(block).toHaveCount(0)
+  await expect(frame).toHaveCount(1)
+  await expect(nodes).toHaveCount(initialNodes)
+  await expect(page.locator('.group-box')).toHaveCount(0)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+})
+
+test('places folded inputs on the left edge and outputs on the right edge', async ({ page }) => {
+  const nodes = page.locator('.stage .node')
+  const block = page.locator('.collapsed-block')
+  const menu = page.getByRole('menu', { name: '画布操作' })
+
+  await createFold(page, nodes, [2, 3])
+  await expect(menu).toBeHidden()
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+
+  const anchors = await page.evaluate(() => {
+    const rect = document.querySelector('.collapsed-block rect') as SVGRectElement
+    const b = rect.getBBox()
+    const eps = 0.75
+    const points: { edge: string; along: number }[] = []
+    for (const path of document.querySelectorAll('path.wire')) {
+      const nums = (path.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
+      for (const p of [nums.slice(0, 2), nums.slice(-2)]) {
+        const insideX = p[0] >= b.x - eps && p[0] <= b.x + b.width + eps
+        const insideY = p[1] >= b.y - eps && p[1] <= b.y + b.height + eps
+        if (Math.abs(p[1] - b.y) < eps && insideX) points.push({ edge: 'top', along: p[0] })
+        else if (Math.abs(p[1] - (b.y + b.height)) < eps && insideX) {
+          points.push({ edge: 'bottom', along: p[0] })
+        } else if (Math.abs(p[0] - b.x) < eps && insideY) points.push({ edge: 'left', along: p[1] })
+        else if (Math.abs(p[0] - (b.x + b.width)) < eps && insideY) {
+          points.push({ edge: 'right', along: p[1] })
+        }
+      }
+    }
+    return points
+  })
+
+  expect(anchors).toHaveLength(6)
+  expect(new Set(anchors.map(point => `${point.edge}:${point.along.toFixed(2)}`)).size).toBe(6)
+  expect(anchors.filter(point => point.edge === 'left')).toHaveLength(4)
+  expect(anchors.filter(point => point.edge === 'right')).toHaveLength(2)
+  expect(anchors.filter(point => point.edge === 'top' || point.edge === 'bottom')).toHaveLength(0)
+})
+
+test('folding an explicitly grouped selection keeps the group', async ({ page }) => {
+  const nodes = page.locator('.stage .node')
+  const frame = page.locator('.fold-box')
+  const block = page.locator('.collapsed-block')
+  const menu = page.getByRole('menu', { name: '画布操作' })
+
+  await nodes.nth(2).click()
+  await nodes.nth(4).click({ modifiers: ['Shift'] })
+  await nodes.nth(2).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '组合' }).click()
+  await expect(menu).toBeHidden()
+
+  const groupBox = await page.locator('.group-box').boundingBox()
+  if (!groupBox) throw new Error('group box missing after grouping')
+
+  await nodes.nth(2).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '折叠', exact: true }).click()
+  await expect(menu).toBeHidden()
+  await expect(frame).toHaveCount(1)
+  await expect(page.locator('.group-box.selected')).toHaveCount(1)
+
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+
+  const box = await block.boundingBox()
+  if (!box) throw new Error('collapsed block missing')
+  expect(box.width).toBeLessThan(groupBox.width)
+  expect(box.height).toBeLessThan(groupBox.height)
+
+  await page.locator('.card-toggle').click()
+  await expect(block).toHaveCount(0)
+  await expect(frame).toHaveCount(1)
+  await expect(page.locator('.group-box.selected')).toHaveCount(1)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+
+  await nodes.nth(2).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '展开', exact: true }).click()
+  await expect(frame).toHaveCount(0)
+  await expect(page.locator('.group-box.selected')).toHaveCount(1)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+})
+
+test('renames a collapsed block and keeps the name after reload', async ({ page }) => {
+  const nodes = page.locator('.stage .node')
+  const block = page.locator('.collapsed-block')
+  const menu = page.getByRole('menu', { name: '画布操作' })
+  const editor = page.locator('.card-rename')
+
+  await createFold(page, nodes, [2, 4])
+  await expect(menu).toBeHidden()
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+
+  const box = await block.boundingBox()
+  if (!box) throw new Error('collapsed block missing')
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' })
+  const renameItem = page.getByRole('menuitem', { name: '重命名', exact: true })
+  await expect(renameItem).toBeEnabled()
+  await renameItem.click()
+  await expect(menu).toBeHidden()
+  await expect(editor).toBeVisible()
+  await editor.fill('加法核心')
+  await editor.press('Enter')
+
+  await expect(editor).toHaveCount(0)
+  await expect(block).toContainText('加法核心')
+  await page.waitForFunction(() =>
+    (localStorage.getItem('linea.circuit.v1') ?? '').includes('"label": "加法核心"'),
+  )
+  await page.reload()
+  await expect(block).toContainText('加法核心')
+  // 重命名提交会取消选中，折叠卡片仍应保持折叠底色而不是变成纯白
+  const cardFill = await block
+    .locator('rect')
+    .first()
+    .evaluate(element => getComputedStyle(element).fill)
+  expect(cardFill).not.toBe('rgb(255, 255, 255)')
+
+  await block.focus()
+  await page.keyboard.press('Enter')
+  await expect(block).toHaveCount(0)
+  await expect(page.locator('.card-rename')).toHaveCount(0)
+  await expect(page.locator('.fold-box')).toHaveCount(1)
+
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+  await expect(block).toContainText('加法核心')
+
+  await block.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '展开', exact: true }).click()
+  await expect(block).toHaveCount(0)
+  await expect(page.locator('.fold-box')).toHaveCount(0)
+})
+
+test('shift-click and marquee select a collapsed block as a unit', async ({ page }) => {
+  const nodes = page.locator('.stage .node')
+  const block = page.locator('.collapsed-block')
+  const menu = page.getByRole('menu', { name: '画布操作' })
+
+  await createFold(page, nodes, [2, 4])
+  await expect(menu).toBeHidden()
+  await collapseFoldFrame(page)
+  await expect(block).toHaveCount(1)
+
+  const box = await block.boundingBox()
+  if (!box) throw new Error('collapsed block missing')
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+
+  await nodes.nth(0).click()
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(1)
+  await page.keyboard.down('Shift')
+  await page.mouse.click(center.x, center.y)
+  await page.keyboard.up('Shift')
+  await expect(block).toHaveClass(/selected/)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(1)
+
+  await page.keyboard.down('Shift')
+  await page.mouse.click(center.x, center.y)
+  await page.keyboard.up('Shift')
+  await expect(block).not.toHaveClass(/selected/)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(1)
+
+  await page.mouse.click(1100, 760)
+  const start = { x: box.x - 8, y: box.y - 8 }
+  const end = { x: box.x + box.width + 8, y: box.y + box.height + 8 }
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(end.x, end.y, { steps: 6 })
+  await page.mouse.up()
+
+  await expect(block).toHaveClass(/selected/)
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await expect(block).not.toHaveClass(/selected/)
+})
+
 test('context menu cuts, copies, pastes, and deletes', async ({ page }) => {
   const nodes = page.locator('.stage .node')
   const menu = page.getByRole('menu', { name: '画布操作' })
@@ -226,9 +505,10 @@ test('context menu cuts, copies, pastes, and deletes', async ({ page }) => {
   await nodes.first().click()
   await nodes.first().click({ button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(page.getByRole('menuitem')).toHaveCount(7)
+  await expect(page.getByRole('menuitem')).toHaveCount(9)
   await expect(page.getByRole('menuitem', { name: '组合', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '解组', exact: true })).toBeDisabled()
+  await expect(page.getByRole('menuitem', { name: '重命名', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '剪切' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: '复制' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: '删除' })).toBeVisible()
@@ -276,7 +556,7 @@ test('wire context menu deletes the clicked wire and closes on outside click', a
 
   await page.mouse.click(point.x, point.y, { button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(items).toHaveCount(7)
+  await expect(items).toHaveCount(9)
   const deleteWire = page.getByRole('menuitem', { name: '删除连线' })
   await expect(deleteWire).toBeEnabled()
   await expect(deleteWire).toBeFocused()
@@ -310,7 +590,7 @@ test('canvas context menu keeps every action visible and disables the unavailabl
 
   await page.mouse.click(1100, 760, { button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(items).toHaveCount(7)
+  await expect(items).toHaveCount(9)
   for (const item of await items.all()) {
     await expect(item).toBeDisabled()
   }

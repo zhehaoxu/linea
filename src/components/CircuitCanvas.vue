@@ -6,20 +6,26 @@ import {
   addText,
   circuit,
   clipboardState,
+  collapseFold,
+  collapseMode,
   connect,
   copySelection,
   cutSelection,
   cycleClockFreq,
   deleteSelection,
   duplicateSelection,
+  expandFold,
   flushNudge,
   groupSelection,
   nudgeSelection,
   pasteClipboard,
   recordHistory,
   removeNode,
+  renameFold,
   selectAll,
   toggleNode,
+  toggleSelectionCollapse,
+  unfoldFold,
   ungroupSelection,
 } from '../circuit/store'
 import { NODE_SPECS, nodeFrame, portPointOf, textMetrics, wirePath } from '../circuit/specs'
@@ -28,6 +34,7 @@ import { t, modLabel } from '../i18n'
 import type {
   BasicNodeType,
   Bit,
+  CircuitFold,
   CircuitGroup,
   CircuitNode as CircuitNodeData,
   NodeType,
@@ -84,8 +91,27 @@ let autoFit = true
 let observer: ResizeObserver | null = null
 
 type MenuTarget = { kind: 'node'; id: string } | { kind: 'wire'; id: string } | { kind: 'canvas' }
-type MenuAction = 'group' | 'ungroup' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
-type MenuIcon = 'group' | 'ungroup' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
+type MenuAction =
+  | 'group'
+  | 'ungroup'
+  | 'collapse'
+  | 'rename'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'duplicate'
+  | 'delete'
+type MenuIcon =
+  | 'group'
+  | 'ungroup'
+  | 'collapse'
+  | 'expand'
+  | 'rename'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'duplicate'
+  | 'delete'
 
 interface MenuItem {
   id: MenuAction
@@ -123,6 +149,31 @@ const canGroupSelection = computed(() => {
   return !(group.nodes.length === count && group.nodes.every(id => selectedNodeIds.value.has(id)))
 })
 const canUngroupSelection = computed(() => touchedGroups.value.length > 0)
+const selectionCollapse = computed(() => collapseMode())
+const renameTarget = computed<CircuitFold | null>(() => {
+  const selection = circuit.selection
+  if (!selection || selection.nodes.length < 2) return null
+  const selected = new Set(selection.nodes)
+  return (
+    circuit.folds.find(
+      fold =>
+        fold.collapsed &&
+        fold.nodes.length === selected.size &&
+        fold.nodes.every(id => selected.has(id)),
+    ) ?? null
+  )
+})
+const contextFoldTarget = computed<CircuitFold | null>(() => {
+  const target = menu.value?.target
+  if (target?.kind !== 'node') return null
+  const fold = circuit.folds.find(item => !item.collapsed && item.nodes.includes(target.id))
+  if (!fold) return null
+  const selection = circuit.selection
+  if (!selection) return null
+  const selected = new Set(selection.nodes)
+  if (fold.nodes.length === selected.size && fold.nodes.every(id => selected.has(id))) return null
+  return fold
+})
 
 const menuItems = computed<MenuItem[]>(() => {
   const target = menu.value?.target
@@ -131,6 +182,8 @@ const menuItems = computed<MenuItem[]>(() => {
   const isWire = target.kind === 'wire'
   const hasNodes = (circuit.selection?.nodes.length ?? 0) > 0
   const hasWires = (circuit.selection?.wires.length ?? 0) > 0
+  const unfolding = selectionCollapse.value === 'expand' || Boolean(contextFoldTarget.value)
+  const canCollapse = Boolean(selectionCollapse.value) || Boolean(contextFoldTarget.value)
   return [
     {
       id: 'group',
@@ -143,6 +196,18 @@ const menuItems = computed<MenuItem[]>(() => {
       label: t('menu.ungroup'),
       icon: 'ungroup',
       disabled: !isNode || !canUngroupSelection.value,
+    },
+    {
+      id: 'collapse',
+      label: unfolding ? t('menu.expand') : t('menu.collapse'),
+      icon: unfolding ? 'expand' : 'collapse',
+      disabled: !canCollapse,
+    },
+    {
+      id: 'rename',
+      label: t('menu.rename'),
+      icon: 'rename',
+      disabled: !renameTarget.value,
     },
     {
       id: 'cut',
@@ -193,6 +258,14 @@ interface EditingState {
 const editing = ref<EditingState | null>(null)
 const editValue = ref('')
 const editorRef = ref<HTMLTextAreaElement | null>(null)
+
+interface RenameState {
+  id: string
+}
+
+const renaming = ref<RenameState | null>(null)
+const renameValue = ref('')
+const renameRef = ref<HTMLInputElement | null>(null)
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -254,15 +327,22 @@ function onWireMenu(ev: MouseEvent, id: string) {
 }
 
 function onCanvasMenu(ev: MouseEvent) {
+  const fold = foldUnitAtPoint(toWorld(ev.clientX, ev.clientY))
+  if (fold) circuit.selection = { nodes: [...fold.nodes], wires: [] }
   openMenu(ev.clientX, ev.clientY, { kind: 'canvas' })
 }
 
 function runMenu(action: MenuAction) {
   const target = menu.value?.target
+  const contextFold = contextFoldTarget.value
   closeMenu()
   if (!target) return
   if (action === 'group') groupSelection()
   else if (action === 'ungroup') ungroupSelection()
+  else if (action === 'collapse') {
+    if (contextFold) unfoldFold(contextFold.id)
+    else toggleSelectionCollapse()
+  } else if (action === 'rename') beginRename()
   else if (action === 'cut') cutSelection()
   else if (action === 'copy') copySelection()
   else if (action === 'paste') pasteClipboard()
@@ -330,13 +410,13 @@ interface GroupFrame {
   h: number
 }
 
-function groupFrame(group: CircuitGroup): GroupFrame | null {
+function nodesFrame(ids: string[], pad = 10): GroupFrame | null {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
   let count = 0
-  for (const id of group.nodes) {
+  for (const id of ids) {
     const node = circuit.nodes.find(item => item.id === id)
     if (!node) continue
     const frame = nodeFrame(node)
@@ -347,7 +427,6 @@ function groupFrame(group: CircuitGroup): GroupFrame | null {
     count += 1
   }
   if (!count) return null
-  const pad = 10
   return {
     x: minX - pad,
     y: minY - pad,
@@ -356,8 +435,65 @@ function groupFrame(group: CircuitGroup): GroupFrame | null {
   }
 }
 
+function groupFrame(group: CircuitGroup): GroupFrame | null {
+  return nodesFrame(group.nodes)
+}
+
+const FOLD_FRAME_PAD = 22
+
+function foldFrame(ids: string[]): GroupFrame | null {
+  return nodesFrame(ids, FOLD_FRAME_PAD)
+}
+
 function groupHasSelection(group: CircuitGroup): boolean {
   return group.nodes.some(id => isNodeSelected(id))
+}
+
+function frameContains(frame: GroupFrame, point: Vec): boolean {
+  return (
+    point.x >= frame.x &&
+    point.x <= frame.x + frame.w &&
+    point.y >= frame.y &&
+    point.y <= frame.y + frame.h
+  )
+}
+
+function collapsedFoldAtPoint(point: Vec): CircuitFold | null {
+  for (let index = collapsedBlocks.value.length - 1; index >= 0; index--) {
+    const block = collapsedBlocks.value[index]
+    if (!frameContains(block, point)) continue
+    return circuit.folds.find(fold => fold.id === block.id) ?? null
+  }
+  return null
+}
+
+function frameEdgeHit(frame: GroupFrame, point: Vec): boolean {
+  const tolerance = 7 / circuit.view.zoom
+  const inX = point.x >= frame.x - tolerance && point.x <= frame.x + frame.w + tolerance
+  const inY = point.y >= frame.y - tolerance && point.y <= frame.y + frame.h + tolerance
+  if (!inX || !inY) return false
+  return (
+    Math.abs(point.x - frame.x) <= tolerance ||
+    Math.abs(point.x - (frame.x + frame.w)) <= tolerance ||
+    Math.abs(point.y - frame.y) <= tolerance ||
+    Math.abs(point.y - (frame.y + frame.h)) <= tolerance
+  )
+}
+
+function openFoldAtPoint(point: Vec): CircuitFold | null {
+  for (let index = circuit.folds.length - 1; index >= 0; index--) {
+    const fold = circuit.folds[index]
+    if (fold.collapsed) continue
+    const ids = fold.nodes.filter(id => circuit.nodes.some(node => node.id === id))
+    if (ids.length < 2) continue
+    const frame = foldFrame(ids)
+    if (frame && frameEdgeHit(frame, point)) return fold
+  }
+  return null
+}
+
+function foldUnitAtPoint(point: Vec): CircuitFold | null {
+  return collapsedFoldAtPoint(point) ?? openFoldAtPoint(point)
 }
 
 function visibleGroupAtPoint(point: Vec): CircuitGroup | null {
@@ -365,17 +501,13 @@ function visibleGroupAtPoint(point: Vec): CircuitGroup | null {
     const group = circuit.groups[index]
     if (!groupHasSelection(group)) continue
     const frame = groupFrame(group)
-    if (!frame) continue
-    if (
-      point.x >= frame.x &&
-      point.x <= frame.x + frame.w &&
-      point.y >= frame.y &&
-      point.y <= frame.y + frame.h
-    ) {
-      return group
-    }
+    if (frame && frameContains(frame, point)) return group
   }
   return null
+}
+
+function visibleUnitAtPoint(point: Vec): CircuitFold | CircuitGroup | null {
+  return foldUnitAtPoint(point) ?? visibleGroupAtPoint(point)
 }
 
 function isNodeFullySelected(id: string): boolean {
@@ -415,12 +547,24 @@ function onSvgDown(ev: PointerEvent) {
   if (ev.button !== 0) return
   closeMenu()
   const point = toWorld(ev.clientX, ev.clientY)
-  const group = visibleGroupAtPoint(point)
+  const group = visibleUnitAtPoint(point)
   if (group) {
     const ids = new Set(group.nodes)
-    circuit.selection = { nodes: [...group.nodes], wires: [] }
+    if (ev.shiftKey) {
+      const current = circuit.selection ?? { nodes: [], wires: [] }
+      const allSelected = group.nodes.every(id => current.nodes.includes(id))
+      const nodes = allSelected
+        ? current.nodes.filter(id => !ids.has(id))
+        : [...new Set([...current.nodes, ...group.nodes])]
+      circuit.selection =
+        nodes.length || current.wires.length ? { nodes, wires: [...current.wires] } : null
+      return
+    }
+    const wasSelected = group.nodes.every(id => isNodeSelected(id))
+    if (!wasSelected) circuit.selection = { nodes: [...group.nodes], wires: [] }
+    const selected = new Set(circuit.selection?.nodes ?? group.nodes)
     const origins = circuit.nodes
-      .filter(item => ids.has(item.id))
+      .filter(item => selected.has(item.id))
       .map(item => ({ id: item.id, x: item.x, y: item.y }))
     drag.value = {
       id: '',
@@ -542,6 +686,7 @@ function findInputNear(point: Vec): WireEnd | null {
   let best: WireEnd | null = null
   let bestDist = 18 / circuit.view.zoom
   for (const node of circuit.nodes) {
+    if (hiddenNodeIds.value.has(node.id)) continue
     if (wiring.value && node.id === wiring.value.from.nodeId) continue
     for (const port of NODE_SPECS[node.type].ins) {
       const dist = Math.hypot(node.x + port.x - point.x, node.y + port.y - point.y)
@@ -618,10 +763,16 @@ function onSvgUp(ev: PointerEvent) {
       const y2 = Math.max(current.ay, current.by)
       const hits = circuit.nodes
         .filter(node => {
+          if (hiddenNodeIds.value.has(node.id)) return false
           const frame = nodeFrame(node)
           return frame.x < x2 && frame.x + frame.w > x1 && frame.y < y2 && frame.y + frame.h > y1
         })
         .map(node => node.id)
+      for (const block of collapsedBlocks.value) {
+        if (block.x < x2 && block.x + block.w > x1 && block.y < y2 && block.y + block.h > y1) {
+          hits.push(...block.nodes)
+        }
+      }
       const baseNodes = current.additive ? (circuit.selection?.nodes ?? []) : []
       const baseWires = current.additive ? (circuit.selection?.wires ?? []) : []
       const selected = new Set([...baseNodes, ...hits])
@@ -703,11 +854,18 @@ function fitView() {
   let maxX = -Infinity
   let maxY = -Infinity
   for (const node of circuit.nodes) {
+    if (hiddenNodeIds.value.has(node.id)) continue
     const frame = nodeFrame(node)
     minX = Math.min(minX, frame.x - 4)
     minY = Math.min(minY, frame.y - 8)
     maxX = Math.max(maxX, frame.x + frame.w + 4)
     maxY = Math.max(maxY, frame.y + frame.h + 8)
+  }
+  for (const block of collapsedBlocks.value) {
+    minX = Math.min(minX, block.x - 4)
+    minY = Math.min(minY, block.y - 8)
+    maxX = Math.max(maxX, block.x + block.w + 4)
+    maxY = Math.max(maxY, block.y + block.h + 8)
   }
   const width = maxX - minX
   const height = maxY - minY
@@ -743,7 +901,7 @@ function addNodeCenter(type: BasicNodeType) {
 }
 
 function onKey(ev: KeyboardEvent) {
-  if (editing.value) return
+  if (editing.value || renaming.value) return
   if (menu.value) {
     if (ev.key === 'Escape') {
       ev.preventDefault()
@@ -883,9 +1041,49 @@ function onEditorKey(ev: KeyboardEvent) {
   }
 }
 
+function beginRename() {
+  const fold = renameTarget.value
+  if (!fold) return
+  renaming.value = { id: fold.id }
+  renameValue.value = fold.label ?? ''
+  nextTick(() => {
+    const input = renameRef.value
+    if (!input) return
+    input.focus()
+    input.select()
+  })
+}
+
+function commitRename() {
+  const current = renaming.value
+  if (!current) return
+  renaming.value = null
+  renameFold(current.id, renameValue.value)
+}
+
+function cancelRename() {
+  renaming.value = null
+}
+
+function onRenameKey(ev: KeyboardEvent) {
+  if (ev.key === 'Escape') {
+    ev.preventDefault()
+    cancelRename()
+    return
+  }
+  if (ev.key === 'Enter') {
+    ev.preventDefault()
+    commitRename()
+  }
+}
+
 function onWindowPointerDown(ev: PointerEvent) {
   flushNudge()
   if (menu.value && menuEl.value && !menuEl.value.contains(ev.target as Node)) closeMenu(false)
+  if (renaming.value) {
+    const target = ev.target as Element | null
+    if (!target?.closest('.card-rename')) commitRename()
+  }
   if (!editing.value) return
   const target = ev.target as Element | null
   if (target?.closest('.text-editor')) return
@@ -895,6 +1093,7 @@ function onWindowPointerDown(ev: PointerEvent) {
 function nodeAtPoint(point: Vec): CircuitNodeData | null {
   for (let index = circuit.nodes.length - 1; index >= 0; index--) {
     const node = circuit.nodes[index]
+    if (hiddenNodeIds.value.has(node.id)) continue
     const frame = nodeFrame(node)
     if (
       point.x >= frame.x &&
@@ -906,6 +1105,13 @@ function nodeAtPoint(point: Vec): CircuitNodeData | null {
     }
   }
   return null
+}
+
+function expandCollapsedBlock(foldId: string) {
+  const fold = circuit.folds.find(item => item.id === foldId)
+  if (!fold?.collapsed) return
+  circuit.selection = { nodes: [...fold.nodes], wires: [] }
+  expandFold(foldId)
 }
 
 function onSvgDblClick(ev: MouseEvent) {
@@ -921,6 +1127,16 @@ function onSvgDblClick(ev: MouseEvent) {
     .elementsFromPoint(ev.clientX, ev.clientY)
     .some(element => element.closest('.wire-hit, .wire'))
   if (overWire) return
+  const fold = collapsedFoldAtPoint(point)
+  if (fold) {
+    expandCollapsedBlock(fold.id)
+    return
+  }
+  const openFold = openFoldAtPoint(point)
+  if (openFold) {
+    circuit.selection = { nodes: [...openFold.nodes], wires: [] }
+    return
+  }
   const group = visibleGroupAtPoint(point)
   if (group) {
     circuit.selection = { nodes: [...group.nodes], wires: [] }
@@ -955,6 +1171,7 @@ const editBox = computed(() => {
 const groupBoxes = computed<GroupBox[]>(() => {
   const boxes: GroupBox[] = []
   for (const group of circuit.groups) {
+    if (group.nodes.some(id => hiddenNodeIds.value.has(id))) continue
     const frame = groupFrame(group)
     if (!frame) continue
     const ids = group.nodes.filter(id => circuit.nodes.some(node => node.id === id))
@@ -963,6 +1180,117 @@ const groupBoxes = computed<GroupBox[]>(() => {
   }
   return boxes
 })
+
+const collapsedFoldByNode = computed(() => {
+  const map = new Map<string, string>()
+  for (const fold of circuit.folds) {
+    if (!fold.collapsed) continue
+    for (const id of fold.nodes) map.set(id, fold.id)
+  }
+  return map
+})
+
+const hiddenNodeIds = computed(() => new Set(collapsedFoldByNode.value.keys()))
+
+const visibleNodes = computed(() =>
+  circuit.nodes.filter(node => !hiddenNodeIds.value.has(node.id)),
+)
+
+interface FoldBox extends GroupFrame {
+  id: string
+  nodes: string[]
+  selected: boolean
+}
+
+const foldBoxes = computed<FoldBox[]>(() => {
+  const boxes: FoldBox[] = []
+  for (const fold of circuit.folds) {
+    if (fold.collapsed) continue
+    const ids = fold.nodes.filter(id => circuit.nodes.some(node => node.id === id))
+    if (ids.length < 2 || ids.some(id => hiddenNodeIds.value.has(id))) continue
+    const frame = foldFrame(ids)
+    if (!frame) continue
+    boxes.push({
+      id: fold.id,
+      ...frame,
+      nodes: ids,
+      selected: ids.every(id => isNodeSelected(id)),
+    })
+  }
+  return boxes
+})
+
+const visibleWires = computed(() =>
+  circuit.wires.filter(wire => {
+    const fromFold = collapsedFoldByNode.value.get(wire.from.nodeId)
+    return !(fromFold && fromFold === collapsedFoldByNode.value.get(wire.to.nodeId))
+  }),
+)
+
+const COLLAPSED_BLOCK_W = 132
+const COLLAPSED_BLOCK_H = 64
+
+type BlockEdge = 'left' | 'right'
+
+interface CollapsedBlock {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  nodes: string[]
+  selected: boolean
+  count: number
+  label?: string
+}
+
+const collapsedBlocks = computed<CollapsedBlock[]>(() => {
+  const blocks: CollapsedBlock[] = []
+  for (const fold of circuit.folds) {
+    if (!fold.collapsed) continue
+    const ids = fold.nodes.filter(id => circuit.nodes.some(node => node.id === id))
+    if (!ids.length) continue
+    const source = nodesFrame(ids)
+    if (!source) continue
+    blocks.push({
+      id: fold.id,
+      x: source.x + source.w / 2 - COLLAPSED_BLOCK_W / 2,
+      y: source.y + source.h / 2 - COLLAPSED_BLOCK_H / 2,
+      w: COLLAPSED_BLOCK_W,
+      h: COLLAPSED_BLOCK_H,
+      nodes: ids,
+      selected: ids.every(id => isNodeSelected(id)),
+      count: ids.length,
+      ...(fold.label ? { label: fold.label } : {}),
+    })
+  }
+  return blocks
+})
+
+const collapsedBlockById = computed(
+  () => new Map(collapsedBlocks.value.map(block => [block.id, block])),
+)
+
+const renameBox = computed(() => {
+  const current = renaming.value
+  if (!current) return null
+  const block = collapsedBlockById.value.get(current.id)
+  if (!block) return null
+  const zoom = circuit.view.zoom
+  return {
+    left: circuit.view.x + (block.x + 10) * zoom,
+    top: circuit.view.y + (block.y + (block.h - 28) / 2) * zoom,
+    width: (block.w - 20) * zoom,
+    height: 28 * zoom,
+    fontSize: 12 * zoom,
+    borderRadius: 7 * zoom,
+  }
+})
+
+function blockCaption(block: CollapsedBlock): string {
+  const caption = block.label ?? t('group.collapsed', { count: block.count })
+  return caption.length > 12 ? `${caption.slice(0, 11)}…` : caption
+}
 
 const sim = ref<Simulation | null>(null)
 
@@ -987,30 +1315,84 @@ watch(
   },
 )
 
+interface WireDraft {
+  id: string
+  aRaw: Vec
+  bRaw: Vec
+  aBlock: CollapsedBlock | null
+  bBlock: CollapsedBlock | null
+  aPoint: Vec
+  bPoint: Vec
+}
+
 const wireViews = computed(() => {
   const byId = new Map(circuit.nodes.map(node => [node.id, node]))
-  return circuit.wires
-    .map(wire => {
-      const a = portPointOf(byId.get(wire.from.nodeId), wire.from.port)
-      const b = portPointOf(byId.get(wire.to.nodeId), wire.to.port)
-      if (!a || !b) return null
-      return {
-        id: wire.id,
-        d: wirePath(a, b),
-        selected: isWireSelected(wire.id),
-        on: sim.value?.wires.get(wire.id) === 1,
-      }
+  const foldByNode = collapsedFoldByNode.value
+  const blockById = collapsedBlockById.value
+
+  const drafts: WireDraft[] = []
+  for (const wire of visibleWires.value) {
+    const aRaw = portPointOf(byId.get(wire.from.nodeId), wire.from.port)
+    const bRaw = portPointOf(byId.get(wire.to.nodeId), wire.to.port)
+    if (!aRaw || !bRaw) continue
+    drafts.push({
+      id: wire.id,
+      aRaw,
+      bRaw,
+      aBlock: blockById.get(foldByNode.get(wire.from.nodeId) ?? '') ?? null,
+      bBlock: blockById.get(foldByNode.get(wire.to.nodeId) ?? '') ?? null,
+      aPoint: aRaw,
+      bPoint: bRaw,
     })
-    .filter(
-      (
-        item,
-      ): item is {
-        id: string
-        d: string
-        selected: boolean
-        on: boolean
-      } => item !== null,
-    )
+  }
+
+  interface AnchorBucket {
+    block: CollapsedBlock
+    edge: BlockEdge
+    items: { draft: WireDraft; side: 'a' | 'b'; key: number }[]
+  }
+  const buckets = new Map<string, AnchorBucket>()
+  const enqueue = (draft: WireDraft, side: 'a' | 'b') => {
+    const block = side === 'a' ? draft.aBlock : draft.bBlock
+    if (!block) return
+    const other = side === 'a' ? draft.bRaw : draft.aRaw
+    // 折叠单元的输入统一走左边、输出统一走右边，避免四边开口交织
+    const edge: BlockEdge = side === 'a' ? 'right' : 'left'
+    const bucketKey = `${block.id}:${edge}`
+    let bucket = buckets.get(bucketKey)
+    if (!bucket) {
+      bucket = { block, edge, items: [] }
+      buckets.set(bucketKey, bucket)
+    }
+    bucket.items.push({ draft, side, key: other.y })
+  }
+  for (const draft of drafts) {
+    if (draft.aBlock) enqueue(draft, 'a')
+    if (draft.bBlock) enqueue(draft, 'b')
+  }
+
+  // 同一条边上的外部导线按另一端的位置排序后均匀分布，避免收束到同一点
+  for (const { block, edge, items } of buckets.values()) {
+    items.sort((p, q) => p.key - q.key)
+    const margin = Math.min(16, block.h * 0.12)
+    const usable = block.h - margin * 2
+    items.forEach((item, index) => {
+      const along = block.y + margin + (usable * (index + 0.5)) / items.length
+      const point =
+        edge === 'left'
+          ? { x: block.x, y: along }
+          : { x: block.x + block.w, y: along }
+      if (item.side === 'a') item.draft.aPoint = point
+      else item.draft.bPoint = point
+    })
+  }
+
+  return drafts.map(draft => ({
+    id: draft.id,
+    d: wirePath(draft.aPoint, draft.bPoint),
+    selected: isWireSelected(draft.id),
+    on: sim.value?.wires.get(draft.id) === 1,
+  }))
 })
 
 const ghost = computed(() => {
@@ -1179,8 +1561,57 @@ defineExpose({
           />
         </g>
         <path v-if="ghost" :d="ghost" class="wire ghost" />
+        <g
+          v-for="block in collapsedBlocks"
+          :key="block.id"
+          class="collapsed-block"
+          :class="{ selected: block.selected }"
+          role="button"
+          tabindex="0"
+          :aria-label="`${block.label ?? t('group.collapsed', { count: block.count })} · ${t('menu.expand')}`"
+          @keydown.enter.prevent.stop="expandCollapsedBlock(block.id)"
+          @keydown.space.prevent.stop="expandCollapsedBlock(block.id)"
+        >
+          <title>{{ block.label ? `${block.label} · ${t('group.expandHint')}` : t('group.expandHint') }}</title>
+          <rect
+            :x="block.x"
+            :y="block.y"
+            :width="block.w"
+            :height="block.h"
+            rx="14"
+            vector-effect="non-scaling-stroke"
+          />
+          <text
+            class="collapsed-label"
+            :x="block.x + block.w / 2"
+            :y="block.y + block.h / 2 + 4"
+            text-anchor="middle"
+          >{{ blockCaption(block) }}</text>
+          <g
+            class="card-toggle"
+            role="button"
+            tabindex="0"
+            :aria-label="t('menu.expand')"
+            @pointerdown.stop
+            @click.stop="expandCollapsedBlock(block.id)"
+            @dblclick.stop.prevent
+            @keydown.enter.prevent.stop="expandCollapsedBlock(block.id)"
+            @keydown.space.prevent.stop="expandCollapsedBlock(block.id)"
+          >
+            <title>{{ t('menu.expand') }}</title>
+            <circle
+              :cx="block.x + block.w - 12"
+              :cy="block.y + 12"
+              r="8"
+              vector-effect="non-scaling-stroke"
+            />
+            <path
+              :d="`M ${block.x + block.w - 15.5} ${block.y + 12} H ${block.x + block.w - 8.5} M ${block.x + block.w - 12} ${block.y + 8.5} V ${block.y + 15.5}`"
+            />
+          </g>
+        </g>
         <CircuitNode
-          v-for="node in circuit.nodes"
+          v-for="node in visibleNodes"
           :key="node.id"
           :node="node"
           :selected="isNodeSelected(node.id)"
@@ -1197,6 +1628,42 @@ defineExpose({
           @edit="beginEdit"
           @menu="onNodeMenu"
         />
+        <g
+          v-for="fold in foldBoxes"
+          :key="`fold-${fold.id}`"
+          class="fold-box"
+          :class="{ selected: fold.selected }"
+        >
+          <rect
+            class="fold-frame"
+            :x="fold.x"
+            :y="fold.y"
+            :width="fold.w"
+            :height="fold.h"
+            rx="14"
+            vector-effect="non-scaling-stroke"
+          />
+          <g
+            class="fold-toggle"
+            role="button"
+            tabindex="0"
+            :aria-label="t('menu.collapse')"
+            @pointerdown.stop
+            @click.stop="collapseFold(fold.id)"
+            @dblclick.stop.prevent
+            @keydown.enter.prevent.stop="collapseFold(fold.id)"
+            @keydown.space.prevent.stop="collapseFold(fold.id)"
+          >
+            <title>{{ t('menu.collapse') }}</title>
+            <circle
+              :cx="fold.x + fold.w - 15"
+              :cy="fold.y + 15"
+              r="8"
+              vector-effect="non-scaling-stroke"
+            />
+            <path :d="`M ${fold.x + fold.w - 18.5} ${fold.y + 15} H ${fold.x + fold.w - 11.5}`" />
+          </g>
+        </g>
         <rect
           v-if="marqueeBox"
           class="marquee"
@@ -1232,6 +1699,27 @@ defineExpose({
       @blur="commitEdit"
     />
 
+    <input
+      v-if="renameBox"
+      ref="renameRef"
+      v-model="renameValue"
+      class="card-rename"
+      type="text"
+      maxlength="24"
+      spellcheck="false"
+      :style="{
+        left: `${renameBox.left}px`,
+        top: `${renameBox.top}px`,
+        width: `${renameBox.width}px`,
+        height: `${renameBox.height}px`,
+        fontSize: `${renameBox.fontSize}px`,
+        borderRadius: `${renameBox.borderRadius}px`,
+      }"
+      @pointerdown.stop
+      @keydown.stop="onRenameKey"
+      @blur="commitRename"
+    />
+
     <Teleport to="body">
       <Transition name="ctx">
         <div
@@ -1264,6 +1752,18 @@ defineExpose({
                   <rect x="4" y="4" width="7" height="7" rx="1.5" />
                   <rect x="13" y="13" width="7" height="7" rx="1.5" />
                   <path d="M13.5 5.5h4v4M10.5 18.5h-4v-4" />
+                </template>
+                <template v-else-if="item.icon === 'collapse'">
+                  <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
+                  <path d="M7.5 12h9" />
+                </template>
+                <template v-else-if="item.icon === 'expand'">
+                  <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
+                  <path d="M12 7.5v9M7.5 12h9" />
+                </template>
+                <template v-else-if="item.icon === 'rename'">
+                  <path d="M4.5 19.5h3.8l10-10a2.1 2.1 0 0 0-3-3l-10 10v3Z" />
+                  <path d="M14.4 5.6l3 3" />
                 </template>
                 <template v-else-if="item.icon === 'cut'">
                   <circle cx="6.5" cy="6.5" r="2.5" />
@@ -1359,6 +1859,23 @@ defineExpose({
   outline: none;
 }
 
+.card-rename {
+  position: absolute;
+  z-index: 6;
+  margin: 0;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  background: var(--panel-solid);
+  color: var(--ink);
+  caret-color: var(--accent);
+  font-family: inherit;
+  font-weight: 500;
+  text-align: center;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .group-box {
   fill: rgba(108, 121, 220, 0.025);
   stroke: rgba(108, 121, 220, 0.3);
@@ -1374,6 +1891,115 @@ defineExpose({
   fill: rgba(108, 121, 220, 0.06);
   stroke: var(--accent);
   stroke-width: 1.4;
+}
+
+.fold-box {
+  pointer-events: none;
+}
+
+.fold-frame {
+  fill: rgba(74, 156, 138, 0.035);
+  stroke: rgba(74, 156, 138, 0.48);
+  stroke-width: 1.1;
+  stroke-dasharray: 6 5;
+  transition:
+    fill 0.12s,
+    stroke 0.12s;
+}
+
+.fold-box.selected .fold-frame {
+  fill: rgba(74, 156, 138, 0.075);
+  stroke: #4a9c8a;
+  stroke-width: 1.4;
+}
+
+.fold-toggle,
+.card-toggle {
+  pointer-events: all;
+  cursor: pointer;
+  outline: none;
+}
+
+.fold-toggle circle {
+  fill: var(--panel-solid);
+  stroke: rgba(74, 156, 138, 0.62);
+  stroke-width: 1.2;
+}
+
+.fold-toggle path {
+  fill: none;
+  stroke: #3f8d7c;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.fold-toggle:hover circle {
+  fill: #e8f4f1;
+}
+
+.fold-toggle:focus-visible circle {
+  stroke: #347f70;
+  stroke-width: 2;
+}
+
+.card-toggle circle {
+  fill: var(--panel-solid);
+  stroke: rgba(74, 156, 138, 0.62);
+  stroke-width: 1.2;
+}
+
+.card-toggle path {
+  fill: none;
+  stroke: #3f8d7c;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.card-toggle:hover circle {
+  fill: #e8f4f1;
+}
+
+.card-toggle:focus-visible circle {
+  stroke: #347f70;
+  stroke-width: 2;
+}
+
+.collapsed-block rect {
+  fill: rgba(74, 156, 138, 0.055);
+  stroke: rgba(74, 156, 138, 0.55);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 4;
+  transition:
+    fill 0.12s,
+    stroke 0.12s;
+}
+
+.collapsed-block:focus {
+  outline: none;
+}
+
+.collapsed-block:focus-visible rect {
+  stroke: #3f8d7c;
+  stroke-width: 1.6;
+}
+
+.collapsed-block.selected rect {
+  fill: rgba(74, 156, 138, 0.14);
+  stroke: #4a9c8a;
+  stroke-width: 1.4;
+}
+
+.collapsed-label {
+  fill: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.collapsed-block.selected .collapsed-label {
+  fill: #347f70;
 }
 
 .wire {

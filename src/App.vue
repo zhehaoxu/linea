@@ -50,7 +50,7 @@ interface SaveFilePickerOptions {
 }
 
 async function handleExport() {
-  const text = serializeCircuit(circuit.nodes, circuit.wires, circuit.groups)
+  const text = serializeCircuit(circuit.nodes, circuit.wires, circuit.groups, circuit.folds)
   const picker = (
     window as unknown as {
       showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<SaveFileHandle>

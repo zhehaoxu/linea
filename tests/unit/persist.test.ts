@@ -6,7 +6,7 @@ import {
   saveStoredCircuit,
   serializeCircuit,
 } from '../../src/circuit/persist'
-import type { CircuitGroup, CircuitNode, Wire } from '../../src/types'
+import type { CircuitFold, CircuitGroup, CircuitNode, Wire } from '../../src/types'
 import { createMemoryStorage } from './storage'
 
 const nodes: CircuitNode[] = [
@@ -22,6 +22,9 @@ const wires: Wire[] = [
   { id: 'w3', from: { nodeId: 'ff', port: 'q' }, to: { nodeId: 'lamp', port: 'a' } },
 ]
 const groups: CircuitGroup[] = [{ id: 'g1', nodes: ['sw', 'clk', 'ff'] }]
+const folds: CircuitFold[] = [
+  { id: 'f1', nodes: ['sw', 'clk'], collapsed: true, label: '核心' },
+]
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', createMemoryStorage())
@@ -32,10 +35,61 @@ afterEach(() => {
 })
 
 describe('circuit serialization', () => {
-  it('round-trips nodes, wires, and groups', () => {
-    const parsed = parseCircuit(serializeCircuit(nodes, wires, groups))
+  it('round-trips nodes, wires, groups, and folds', () => {
+    const parsed = parseCircuit(serializeCircuit(nodes, wires, groups, folds))
 
-    expect(parsed).toEqual({ nodes, wires, groups })
+    expect(parsed).toEqual({ nodes, wires, groups, folds })
+  })
+
+  it('round-trips an expanded fold without touching groups', () => {
+    const expanded: CircuitFold[] = [{ id: 'f1', nodes: ['sw', 'clk'], label: '核心' }]
+    const parsed = parseCircuit(serializeCircuit(nodes, wires, [], expanded))
+
+    expect(parsed.groups).toEqual([])
+    expect(parsed.folds).toEqual(expanded)
+  })
+
+  it('migrates legacy auto groups into folds', () => {
+    const parsed = parseCircuit(
+      JSON.stringify({
+        nodes,
+        wires: [],
+        groups: [{ id: 'g1', nodes: ['sw', 'clk'], collapsed: true, auto: true, label: '核心' }],
+      }),
+    )
+
+    expect(parsed.groups).toEqual([])
+    expect(parsed.folds).toEqual([
+      { id: 'legacy-1', nodes: ['sw', 'clk'], collapsed: true, label: '核心' },
+    ])
+  })
+
+  it('keeps a legacy collapsed group and adds a fold for it', () => {
+    const parsed = parseCircuit(
+      JSON.stringify({
+        nodes,
+        wires: [],
+        groups: [{ id: 'g1', nodes: ['sw', 'clk'], collapsed: true, label: '核心' }],
+      }),
+    )
+
+    expect(parsed.groups).toEqual([{ id: 'g1', nodes: ['sw', 'clk'] }])
+    expect(parsed.folds).toEqual([
+      { id: 'legacy-1', nodes: ['sw', 'clk'], collapsed: true, label: '核心' },
+    ])
+  })
+
+  it('treats non-boolean collapsed values as expanded and drops invalid labels', () => {
+    const parsed = parseCircuit(
+      JSON.stringify({
+        nodes,
+        wires: [],
+        groups: [{ id: 'g1', nodes: ['sw', 'clk'], collapsed: 'yes', auto: 'yes', label: 42 }],
+      }),
+    )
+
+    expect(parsed.groups).toEqual([{ id: 'g1', nodes: ['sw', 'clk'] }])
+    expect(parsed.folds).toEqual([])
   })
 
   it('normalizes missing clock and text fields', () => {
@@ -52,6 +106,7 @@ describe('circuit serialization', () => {
     expect(parsed.nodes[0]).toMatchObject({ type: 'clock', freq: 1 })
     expect(parsed.nodes[1]).toMatchObject({ type: 'text', text: '' })
     expect(parsed.groups).toEqual([])
+    expect(parsed.folds).toEqual([])
   })
 
   it('rejects duplicate input connections', () => {
@@ -87,6 +142,23 @@ describe('circuit serialization', () => {
     expect(() => parseCircuit(text)).toThrow('invalid group nodes')
   })
 
+  it('rejects overlapping folds', () => {
+    const text = JSON.stringify({
+      nodes: [
+        { id: 'a', type: 'switch', x: 0, y: 0, value: 0 },
+        { id: 'b', type: 'switch', x: 0, y: 80, value: 0 },
+        { id: 'c', type: 'lamp', x: 160, y: 20, value: 0 },
+      ],
+      wires: [],
+      folds: [
+        { id: 'f1', nodes: ['a', 'b'] },
+        { id: 'f2', nodes: ['b', 'c'] },
+      ],
+    })
+
+    expect(() => parseCircuit(text)).toThrow('invalid fold nodes')
+  })
+
   it('rejects invalid JSON and unknown node types', () => {
     expect(() => parseCircuit('{')).toThrow('invalid json')
     expect(() =>
@@ -102,10 +174,10 @@ describe('circuit serialization', () => {
 
 describe('local storage persistence', () => {
   it('saves and loads a circuit', () => {
-    saveStoredCircuit(nodes, wires, groups)
+    saveStoredCircuit(nodes, wires, groups, folds)
 
     expect(localStorage.getItem(STORAGE_KEY)).toContain('"linea-circuit"')
-    expect(loadStoredCircuit()).toEqual({ nodes, wires, groups })
+    expect(loadStoredCircuit()).toEqual({ nodes, wires, groups, folds })
   })
 
   it('ignores corrupt stored data', () => {

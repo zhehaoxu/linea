@@ -1,10 +1,11 @@
-import type { CircuitGroup, CircuitNode, NodeType, Wire } from '../types'
+import type { CircuitFold, CircuitGroup, CircuitNode, NodeType, Wire } from '../types'
 import { NODE_SPECS } from './specs'
 
 export interface CircuitData {
   nodes: CircuitNode[]
   wires: Wire[]
   groups?: CircuitGroup[]
+  folds?: CircuitFold[]
 }
 
 export const STORAGE_KEY = 'linea.circuit.v1'
@@ -24,6 +25,7 @@ export function serializeCircuit(
   nodes: CircuitNode[],
   wires: Wire[],
   groups: CircuitGroup[],
+  folds: CircuitFold[],
 ): string {
   return JSON.stringify(
     {
@@ -32,6 +34,7 @@ export function serializeCircuit(
       nodes,
       wires,
       groups,
+      folds,
     },
     null,
     2,
@@ -111,13 +114,27 @@ function parseWires(rawWires: unknown, nodes: CircuitNode[]): Wire[] {
   return wires
 }
 
-function parseGroups(rawGroups: unknown, nodes: CircuitNode[]): CircuitGroup[] {
-  if (rawGroups === undefined) return []
+function readLabel(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+interface FoldSeed {
+  nodes: string[]
+  collapsed?: boolean
+  label?: string
+}
+
+function parseGroups(
+  rawGroups: unknown,
+  nodes: CircuitNode[],
+): { groups: CircuitGroup[]; legacyFolds: FoldSeed[] } {
+  if (rawGroups === undefined) return { groups: [], legacyFolds: [] }
   if (!Array.isArray(rawGroups)) throw new Error('invalid groups')
   const nodeIds = new Set(nodes.map(node => node.id))
   const usedNodes = new Set<string>()
   const groupIds = new Set<string>()
   const groups: CircuitGroup[] = []
+  const legacyFolds: FoldSeed[] = []
   for (const item of rawGroups) {
     if (!isRecord(item) || typeof item.id !== 'string' || !item.id || !Array.isArray(item.nodes)) {
       throw new Error('invalid group')
@@ -133,9 +150,68 @@ function parseGroups(rawGroups: unknown, nodes: CircuitNode[]): CircuitGroup[] {
     }
     groupIds.add(item.id)
     for (const id of ids) usedNodes.add(id)
-    groups.push({ id: item.id, nodes: ids })
+    // 旧版本把折叠存在 group 上：auto 组整体迁移为折叠，折叠的显式组保留分组并另建折叠
+    const auto = item.auto === true
+    const folded = item.collapsed === true
+    if (!auto) groups.push({ id: item.id, nodes: ids })
+    if (auto || folded) {
+      const label = readLabel(item.label)
+      legacyFolds.push({
+        nodes: ids,
+        ...(folded || auto ? { collapsed: true } : {}),
+        ...(label ? { label } : {}),
+      })
+    }
   }
-  return groups
+  return { groups, legacyFolds }
+}
+
+function parseFolds(
+  rawFolds: unknown,
+  nodes: CircuitNode[],
+  legacyFolds: FoldSeed[],
+): CircuitFold[] {
+  if (rawFolds !== undefined && !Array.isArray(rawFolds)) throw new Error('invalid folds')
+  const nodeIds = new Set(nodes.map(node => node.id))
+  const usedNodes = new Set<string>()
+  const foldIds = new Set<string>()
+  const folds: CircuitFold[] = []
+  const add = (fold: CircuitFold) => {
+    const ids = fold.nodes
+    if (ids.length < 2 || ids.some(id => !nodeIds.has(id) || usedNodes.has(id))) {
+      throw new Error('invalid fold nodes')
+    }
+    if (foldIds.has(fold.id)) throw new Error('duplicate fold id')
+    foldIds.add(fold.id)
+    for (const id of ids) usedNodes.add(id)
+    folds.push(fold)
+  }
+  let legacyIndex = 0
+  for (const seed of legacyFolds) {
+    add({
+      id: `legacy-${++legacyIndex}`,
+      nodes: [...seed.nodes],
+      ...(seed.collapsed ? { collapsed: true } : {}),
+      ...(seed.label ? { label: seed.label } : {}),
+    })
+  }
+  for (const item of (rawFolds ?? []) as unknown[]) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !item.id || !Array.isArray(item.nodes)) {
+      throw new Error('invalid fold')
+    }
+    const uniqueIds = [...new Set(item.nodes)]
+    if (uniqueIds.length < 2 || uniqueIds.some(id => typeof id !== 'string')) {
+      throw new Error('invalid fold nodes')
+    }
+    const label = readLabel(item.label)
+    add({
+      id: item.id,
+      nodes: uniqueIds as string[],
+      ...(item.collapsed === true ? { collapsed: true } : {}),
+      ...(label ? { label } : {}),
+    })
+  }
+  return folds
 }
 
 export function parseCircuit(text: string): CircuitData {
@@ -154,8 +230,9 @@ export function parseCircuit(text: string): CircuitData {
 
   const nodes = parseNodes(raw.nodes)
   const wires = parseWires(raw.wires, nodes)
-  const groups = parseGroups(raw.groups, nodes)
-  return { nodes, wires, groups }
+  const { groups, legacyFolds } = parseGroups(raw.groups, nodes)
+  const folds = parseFolds(raw.folds, nodes, legacyFolds)
+  return { nodes, wires, groups, folds }
 }
 
 export function loadStoredCircuit(): CircuitData | null {
@@ -168,9 +245,14 @@ export function loadStoredCircuit(): CircuitData | null {
   }
 }
 
-export function saveStoredCircuit(nodes: CircuitNode[], wires: Wire[], groups: CircuitGroup[]) {
+export function saveStoredCircuit(
+  nodes: CircuitNode[],
+  wires: Wire[],
+  groups: CircuitGroup[],
+  folds: CircuitFold[],
+) {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeCircuit(nodes, wires, groups))
+    localStorage.setItem(STORAGE_KEY, serializeCircuit(nodes, wires, groups, folds))
   } catch {
     // 存储不可用时静默跳过
   }

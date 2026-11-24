@@ -50,6 +50,13 @@ export interface CircuitGroup {
   nodes: string[]
 }
 
+export interface CircuitFold {
+  id: string
+  nodes: string[]
+  collapsed?: boolean
+  label?: string
+}
+
 export interface Selection {
   nodes: string[]
   wires: string[]
