@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import type {
   BasicNodeType,
+  CircuitFold,
   CircuitGroup,
   CircuitNode,
   Selection,
@@ -16,11 +17,13 @@ import { nodeFrame } from './specs'
 let nodeSeq = 0
 let wireSeq = 0
 let groupSeq = 0
+let foldSeq = 0
 
 interface Snapshot {
   nodes: CircuitNode[]
   wires: Wire[]
   groups: CircuitGroup[]
+  folds: CircuitFold[]
   selection: Selection | null
 }
 
@@ -30,7 +33,7 @@ export const historyState = reactive({ canUndo: false, canRedo: false })
 
 let past: Snapshot[] = []
 let future: Snapshot[] = []
-let committed: Snapshot = { nodes: [], wires: [], groups: [], selection: null }
+let committed: Snapshot = { nodes: [], wires: [], groups: [], folds: [], selection: null }
 let committedKey = ''
 let nudgeBase: Snapshot | null = null
 let nudgeTimer: number | undefined
@@ -47,6 +50,15 @@ function cloneGroups(groups: CircuitGroup[]): CircuitGroup[] {
   return groups.map(group => ({ id: group.id, nodes: [...group.nodes] }))
 }
 
+function cloneFolds(folds: CircuitFold[]): CircuitFold[] {
+  return folds.map(fold => ({
+    id: fold.id,
+    nodes: [...fold.nodes],
+    ...(fold.collapsed ? { collapsed: true } : {}),
+    ...(fold.label ? { label: fold.label } : {}),
+  }))
+}
+
 function cloneSelection(selection: Selection): Selection {
   return { nodes: [...selection.nodes], wires: [...selection.wires] }
 }
@@ -56,6 +68,7 @@ function takeSnapshot(): Snapshot {
     nodes: cloneNodes(circuit.nodes),
     wires: cloneWires(circuit.wires),
     groups: cloneGroups(circuit.groups),
+    folds: cloneFolds(circuit.folds),
     selection: circuit.selection ? cloneSelection(circuit.selection) : null,
   }
 }
@@ -65,6 +78,7 @@ function snapshotKey(snapshot: Snapshot): string {
     nodes: snapshot.nodes,
     wires: snapshot.wires,
     groups: snapshot.groups,
+    folds: snapshot.folds,
   })
 }
 
@@ -80,7 +94,7 @@ function schedulePersist() {
   if (persistTimer !== undefined) window.clearTimeout(persistTimer)
   persistTimer = window.setTimeout(() => {
     persistTimer = undefined
-    saveStoredCircuit(circuit.nodes, circuit.wires, circuit.groups)
+    saveStoredCircuit(circuit.nodes, circuit.wires, circuit.groups, circuit.folds)
   }, 250)
 }
 
@@ -88,6 +102,7 @@ function applySnapshot(snapshot: Snapshot) {
   circuit.nodes = cloneNodes(snapshot.nodes)
   circuit.wires = cloneWires(snapshot.wires)
   circuit.groups = cloneGroups(snapshot.groups)
+  circuit.folds = cloneFolds(snapshot.folds)
   circuit.selection = snapshot.selection ? cloneSelection(snapshot.selection) : null
 }
 
@@ -145,6 +160,7 @@ export function nudgeSelection(dx: number, dy: number) {
       nodes: cloneNodes(committed.nodes),
       wires: cloneWires(committed.wires),
       groups: cloneGroups(committed.groups),
+      folds: cloneFolds(committed.folds),
       selection: circuit.selection ? cloneSelection(circuit.selection) : null,
     }
   }
@@ -183,6 +199,7 @@ export const circuit = reactive({
   nodes: [] as CircuitNode[],
   wires: [] as Wire[],
   groups: [] as CircuitGroup[],
+  folds: [] as CircuitFold[],
   selection: null as Selection | null,
   tool: 'select' as Tool,
   running: false,
@@ -228,8 +245,15 @@ function pruneSelection() {
 function pruneGroups() {
   const existing = new Set(circuit.nodes.map(node => node.id))
   circuit.groups = circuit.groups
-    .map(group => ({ id: group.id, nodes: group.nodes.filter(id => existing.has(id)) }))
+    .map(group => ({ ...group, nodes: group.nodes.filter(id => existing.has(id)) }))
     .filter(group => group.nodes.length >= 2)
+}
+
+function pruneFolds() {
+  const existing = new Set(circuit.nodes.map(node => node.id))
+  circuit.folds = circuit.folds
+    .map(fold => ({ ...fold, nodes: fold.nodes.filter(id => existing.has(id)) }))
+    .filter(fold => fold.nodes.length >= 2)
 }
 
 export function removeNode(id: string) {
@@ -237,6 +261,7 @@ export function removeNode(id: string) {
   circuit.nodes = circuit.nodes.filter(node => node.id !== id)
   circuit.wires = circuit.wires.filter(wire => wire.from.nodeId !== id && wire.to.nodeId !== id)
   pruneGroups()
+  pruneFolds()
   pruneSelection()
   recordHistory()
 }
@@ -279,6 +304,7 @@ export function deleteSelection() {
       !wireIds.has(wire.id) && !nodeIds.has(wire.from.nodeId) && !nodeIds.has(wire.to.nodeId),
   )
   pruneGroups()
+  pruneFolds()
   circuit.selection = null
   recordHistory()
 }
@@ -412,10 +438,99 @@ export function alignSelection(edge: AlignEdge) {
   recordHistory()
 }
 
+function selectedFold(): CircuitFold | null {
+  const selection = circuit.selection
+  if (!selection || selection.nodes.length < 2) return null
+  const selected = new Set(selection.nodes)
+  return (
+    circuit.folds.find(
+      fold => fold.nodes.length === selected.size && fold.nodes.every(id => selected.has(id)),
+    ) ?? null
+  )
+}
+
+export function collapseMode(): 'collapse' | 'expand' | null {
+  if (selectedFold()) return 'expand'
+  return (circuit.selection?.nodes.length ?? 0) >= 2 ? 'collapse' : null
+}
+
+export function toggleSelectionCollapse() {
+  const fold = selectedFold()
+  if (fold) {
+    unfoldFold(fold.id)
+    return
+  }
+  const selection = circuit.selection
+  if (!selection || selection.nodes.length < 2) return
+  flushNudge()
+  const nodes = new Set(selection.nodes)
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const item of circuit.folds) {
+      if (!item.nodes.some(id => nodes.has(id))) continue
+      for (const id of item.nodes) {
+        if (nodes.has(id)) continue
+        nodes.add(id)
+        grew = true
+      }
+    }
+  }
+  const absorbed = circuit.folds.filter(item => item.nodes.some(id => nodes.has(id)))
+  const label = absorbed.length === 1 ? absorbed[0].label : undefined
+  circuit.folds = circuit.folds.filter(item => !item.nodes.some(id => nodes.has(id)))
+  circuit.folds.push({
+    id: `f${++foldSeq}`,
+    nodes: [...nodes],
+    ...(label ? { label } : {}),
+  })
+  circuit.selection = { nodes: [...nodes], wires: [] }
+  recordHistory()
+}
+
+export function collapseFold(foldId: string) {
+  const fold = circuit.folds.find(item => item.id === foldId)
+  if (!fold || fold.collapsed) return
+  flushNudge()
+  fold.collapsed = true
+  circuit.selection = { nodes: [...fold.nodes], wires: [] }
+  recordHistory()
+}
+
+export function expandFold(foldId: string) {
+  const fold = circuit.folds.find(item => item.id === foldId)
+  if (!fold?.collapsed) return
+  flushNudge()
+  delete fold.collapsed
+  circuit.selection = { nodes: [...fold.nodes], wires: [] }
+  recordHistory()
+}
+
+export function unfoldFold(foldId: string) {
+  const fold = circuit.folds.find(item => item.id === foldId)
+  if (!fold) return
+  flushNudge()
+  circuit.folds = circuit.folds.filter(item => item.id !== foldId)
+  circuit.selection = { nodes: [...fold.nodes], wires: [] }
+  recordHistory()
+}
+
+export function renameFold(foldId: string, label: string) {
+  const fold = circuit.folds.find(item => item.id === foldId)
+  if (!fold) return
+  const next = label.trim()
+  if ((fold.label ?? '') === next) return
+  flushNudge()
+  if (next) fold.label = next
+  else delete fold.label
+  recordHistory()
+}
+
 interface ClipboardData {
   nodes: CircuitNode[]
   wires: Wire[]
   groups: CircuitGroup[]
+  folds: CircuitFold[]
 }
 
 let clipboard: ClipboardData | null = null
@@ -435,6 +550,14 @@ export function copySelection() {
     groups: circuit.groups
       .filter(group => group.nodes.every(id => ids.has(id)))
       .map(group => ({ id: group.id, nodes: [...group.nodes] })),
+    folds: circuit.folds
+      .filter(fold => fold.nodes.every(id => ids.has(id)))
+      .map(fold => ({
+        id: fold.id,
+        nodes: [...fold.nodes],
+        ...(fold.collapsed ? { collapsed: true } : {}),
+        ...(fold.label ? { label: fold.label } : {}),
+      })),
   }
   clipboardState.hasData = clipboard.nodes.length > 0
   pasteCount = 0
@@ -470,9 +593,18 @@ export function pasteClipboard() {
       nodes: group.nodes.map(id => idMap.get(id)).filter((id): id is string => Boolean(id)),
     }))
     .filter(group => group.nodes.length >= 2)
+  const folds: CircuitFold[] = data.folds
+    .map(fold => ({
+      id: `f${++foldSeq}`,
+      nodes: fold.nodes.map(id => idMap.get(id)).filter((id): id is string => Boolean(id)),
+      ...(fold.collapsed ? { collapsed: true } : {}),
+      ...(fold.label ? { label: fold.label } : {}),
+    }))
+    .filter(fold => fold.nodes.length >= 2)
   circuit.nodes.push(...nodes)
   circuit.wires.push(...wires)
   circuit.groups.push(...groups)
+  circuit.folds.push(...folds)
   circuit.selection = {
     nodes: nodes.map(node => node.id),
     wires: wires.map(wire => wire.id),
@@ -490,6 +622,7 @@ export function clearCircuit() {
   circuit.nodes = []
   circuit.wires = []
   circuit.groups = []
+  circuit.folds = []
   circuit.selection = null
   circuit.running = false
   recordHistory()
@@ -499,6 +632,7 @@ function syncSequences() {
   let maxNode = nodeSeq
   let maxWire = wireSeq
   let maxGroup = groupSeq
+  let maxFold = foldSeq
   for (const node of circuit.nodes) {
     const match = /^n(\d+)$/.exec(node.id)
     if (match) maxNode = Math.max(maxNode, Number(match[1]))
@@ -511,9 +645,14 @@ function syncSequences() {
     const match = /^g(\d+)$/.exec(group.id)
     if (match) maxGroup = Math.max(maxGroup, Number(match[1]))
   }
+  for (const fold of circuit.folds) {
+    const match = /^f(\d+)$/.exec(fold.id)
+    if (match) maxFold = Math.max(maxFold, Number(match[1]))
+  }
   nodeSeq = maxNode
   wireSeq = maxWire
   groupSeq = maxGroup
+  foldSeq = maxFold
 }
 
 export function importCircuit(data: CircuitData) {
@@ -521,7 +660,9 @@ export function importCircuit(data: CircuitData) {
   circuit.nodes = cloneNodes(data.nodes)
   circuit.wires = cloneWires(data.wires)
   circuit.groups = cloneGroups(data.groups ?? [])
+  circuit.folds = cloneFolds(data.folds ?? [])
   pruneGroups()
+  pruneFolds()
   circuit.selection = null
   circuit.running = false
   circuit.time = 0
@@ -562,6 +703,9 @@ if (stored) {
   circuit.nodes = cloneNodes(stored.nodes)
   circuit.wires = cloneWires(stored.wires)
   circuit.groups = cloneGroups(stored.groups ?? [])
+  circuit.folds = cloneFolds(stored.folds ?? [])
+  pruneGroups()
+  pruneFolds()
   syncSequences()
 }
 past = []

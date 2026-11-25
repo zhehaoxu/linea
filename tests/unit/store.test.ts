@@ -9,6 +9,7 @@ const EMPTY_CIRCUIT = JSON.stringify({
   nodes: [],
   wires: [],
   groups: [],
+  folds: [],
 })
 
 async function loadStore() {
@@ -231,6 +232,154 @@ describe('circuit history', () => {
     store.redo()
 
     expect(store.circuit.groups).toEqual([])
+  })
+
+  it('frames a plain multi-selection without creating a group', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 180, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    expect(store.collapseMode()).toBe('collapse')
+
+    store.toggleSelectionCollapse()
+
+    expect(store.circuit.groups).toEqual([])
+    expect(store.circuit.folds).toHaveLength(1)
+    expect(store.circuit.folds[0]).toMatchObject({ nodes: [first.id, second.id] })
+    expect(store.circuit.folds[0].collapsed).toBeUndefined()
+    expect(store.circuit.folds[0].label).toBeUndefined()
+    expect(store.collapseMode()).toBe('expand')
+
+    store.undo()
+
+    expect(store.circuit.folds).toEqual([])
+
+    store.redo()
+
+    expect(store.circuit.folds[0].nodes).toEqual([first.id, second.id])
+    expect(store.circuit.folds[0].collapsed).toBeUndefined()
+
+    const foldId = store.circuit.folds[0].id
+    store.collapseFold(foldId)
+
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+    expect(store.circuit.selection).toEqual({ nodes: [first.id, second.id], wires: [] })
+    expect(store.collapseMode()).toBe('expand')
+
+    store.expandFold(foldId)
+
+    expect(store.circuit.groups).toEqual([])
+    expect(store.circuit.folds).toHaveLength(1)
+    expect(store.circuit.folds[0].collapsed).toBeUndefined()
+    expect(store.circuit.folds[0].nodes).toEqual([first.id, second.id])
+    expect(store.circuit.nodes.map(node => node.id)).toEqual([first.id, second.id])
+    expect(store.circuit.selection).toEqual({ nodes: [first.id, second.id], wires: [] })
+  })
+
+  it('unfolds a selected fold back to a plain multi-selection', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 180, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.toggleSelectionCollapse()
+    const foldId = store.circuit.folds[0].id
+    store.collapseFold(foldId)
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+
+    store.toggleSelectionCollapse()
+
+    expect(store.circuit.folds).toEqual([])
+    expect(store.circuit.groups).toEqual([])
+    expect(store.circuit.selection).toEqual({ nodes: [first.id, second.id], wires: [] })
+    expect(store.collapseMode()).toBe('collapse')
+
+    store.undo()
+
+    expect(store.circuit.folds).toHaveLength(1)
+    expect(store.circuit.folds[0].id).toBe(foldId)
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+  })
+
+  it('folds an explicit group without changing the group', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 180, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.groupSelection()
+    expect(store.collapseMode()).toBe('collapse')
+
+    store.toggleSelectionCollapse()
+
+    expect(store.circuit.groups).toHaveLength(1)
+    expect(store.circuit.folds[0]).toMatchObject({ nodes: [first.id, second.id] })
+    expect(store.circuit.folds[0].collapsed).toBeUndefined()
+    expect(store.collapseMode()).toBe('expand')
+
+    store.collapseFold(store.circuit.folds[0].id)
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+
+    store.toggleSelectionCollapse()
+
+    expect(store.circuit.groups).toHaveLength(1)
+    expect(store.circuit.groups[0].nodes).toEqual([first.id, second.id])
+    expect(store.circuit.folds).toEqual([])
+    expect(store.circuit.selection).toEqual({ nodes: [first.id, second.id], wires: [] })
+
+    store.undo()
+
+    expect(store.circuit.folds).toHaveLength(1)
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+    expect(store.circuit.groups).toHaveLength(1)
+  })
+
+  it('keeps the folded state when copying and pasting a fold', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 180, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.toggleSelectionCollapse()
+    store.collapseFold(store.circuit.folds[0].id)
+    store.renameFold(store.circuit.folds[0].id, '核心')
+    store.copySelection()
+    store.pasteClipboard()
+
+    expect(store.circuit.groups).toEqual([])
+    expect(store.circuit.folds).toHaveLength(2)
+    expect(store.circuit.folds[0].collapsed).toBe(true)
+    expect(store.circuit.folds[1].collapsed).toBe(true)
+    expect(store.circuit.folds[1].nodes).toHaveLength(2)
+    expect(store.circuit.folds[1].label).toBe('核心')
+  })
+
+  it('renames a fold and restores the default caption when cleared', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 180, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.toggleSelectionCollapse()
+    store.collapseFold(store.circuit.folds[0].id)
+    const foldId = store.circuit.folds[0].id
+
+    store.renameFold(foldId, '加法器')
+
+    expect(store.circuit.folds[0].label).toBe('加法器')
+
+    store.undo()
+
+    expect(store.circuit.folds[0].label).toBeUndefined()
+
+    store.redo()
+
+    expect(store.circuit.folds[0].label).toBe('加法器')
+
+    store.renameFold(foldId, '   ')
+
+    expect(store.circuit.folds[0].label).toBeUndefined()
   })
 
   it('merges overlapping groups into one group', async () => {

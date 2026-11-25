@@ -8,6 +8,7 @@ const isMac =
 
 export const modLabel = isMac ? '⌘' : 'Ctrl+'
 export const shiftModLabel = isMac ? '⇧⌘' : 'Ctrl+Shift+'
+export const shiftLabel = isMac ? '⇧' : 'Shift+'
 
 const LOCALE_KEY = 'linea.locale.v1'
 
@@ -17,6 +18,10 @@ const MESSAGES = {
   'menu.actions': { zh: '画布操作', en: 'Canvas actions' },
   'menu.group': { zh: '组合', en: 'Group' },
   'menu.ungroup': { zh: '解组', en: 'Ungroup' },
+  'menu.collapse': { zh: '折叠', en: 'Collapse' },
+  'menu.expand': { zh: '展开', en: 'Expand' },
+  'menu.unfold': { zh: '取消折叠', en: 'Unfold' },
+  'menu.rename': { zh: '重命名', en: 'Rename' },
   'menu.copy': { zh: '复制', en: 'Copy' },
   'menu.cut': { zh: '剪切', en: 'Cut' },
   'menu.paste': { zh: '粘贴', en: 'Paste' },
@@ -65,6 +70,9 @@ const MESSAGES = {
   'node.nand': { zh: '与非门', en: 'NAND gate' },
   'node.nor': { zh: '或非门', en: 'NOR gate' },
   'node.xnor': { zh: '同或门', en: 'XNOR gate' },
+
+  'group.collapsed': { zh: '已折叠 · {count}', en: '{count} folded' },
+  'group.expandHint': { zh: '双击展开', en: 'Double-click to expand' },
 
   'templates.button': { zh: '电路模板', en: 'Circuit templates' },
   'templates.title': { zh: '电路模板', en: 'Circuit templates' },
