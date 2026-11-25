@@ -92,7 +92,7 @@ test('context menu groups and ungroups with the keyboard', async ({ page }) => {
   await expect(groupItem).toBeFocused()
 
   await page.keyboard.press('ArrowDown')
-  await expect(page.getByRole('menuitem', { name: '剪切' })).toBeFocused()
+  await expect(page.getByRole('menuitem', { name: '对齐', exact: true })).toBeFocused()
   await page.keyboard.press('End')
   await expect(page.getByRole('menuitem', { name: '删除' })).toBeFocused()
   await page.keyboard.press('Home')
@@ -118,6 +118,44 @@ test('context menu groups and ungroups with the keyboard', async ({ page }) => {
   await expect(page.locator('.group-box')).toHaveCount(1)
   await page.keyboard.press('ControlOrMeta+Shift+z')
   await expect(page.locator('.group-box')).toHaveCount(0)
+})
+
+test('context menu aligns selected nodes from the keyboard', async ({ page }) => {
+  const menu = page.getByRole('menu', { name: '画布操作' })
+  const alignMenu = page.getByRole('menu', { name: '对齐' })
+  const alignItem = page.getByRole('menuitem', { name: '对齐', exact: true })
+  const source = page.locator('.stage .node[data-id="a"]')
+  const xor = page.locator('.stage .node[data-id="xor"]')
+
+  await source.click()
+  await xor.click({ modifiers: ['Shift'] })
+  await expect(page.locator('.stage .node .selected-outline')).toHaveCount(2)
+
+  await source.click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: '组合' })).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(alignItem).toBeFocused()
+
+  await page.keyboard.press('ArrowRight')
+  await expect(alignMenu).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '左对齐' })).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menuitem', { name: '水平居中' })).toBeFocused()
+
+  await page.keyboard.press('Escape')
+  await expect(alignMenu).toBeHidden()
+  await expect(alignItem).toBeFocused()
+  await expect(menu).toBeVisible()
+
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Enter')
+  await expect(menu).toBeHidden()
+  await expect(xor).toHaveAttribute('transform', 'translate(60 40)')
+  await expect(source).toHaveAttribute('transform', 'translate(60 70)')
+
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(xor).toHaveAttribute('transform', 'translate(300 40)')
 })
 
 test('group selection: click selects the group only while its frame is hidden', async ({ page }) => {
@@ -226,9 +264,10 @@ test('context menu cuts, copies, pastes, and deletes', async ({ page }) => {
   await nodes.first().click()
   await nodes.first().click({ button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(page.getByRole('menuitem')).toHaveCount(7)
+  await expect(page.getByRole('menuitem')).toHaveCount(8)
   await expect(page.getByRole('menuitem', { name: '组合', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '解组', exact: true })).toBeDisabled()
+  await expect(page.getByRole('menuitem', { name: '对齐', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '剪切' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: '复制' })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: '删除' })).toBeVisible()
@@ -276,11 +315,12 @@ test('wire context menu deletes the clicked wire and closes on outside click', a
 
   await page.mouse.click(point.x, point.y, { button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(items).toHaveCount(7)
+  await expect(items).toHaveCount(8)
   const deleteWire = page.getByRole('menuitem', { name: '删除连线' })
   await expect(deleteWire).toBeEnabled()
   await expect(deleteWire).toBeFocused()
   await expect(page.getByRole('menuitem', { name: '组合', exact: true })).toBeDisabled()
+  await expect(page.getByRole('menuitem', { name: '对齐', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '剪切' })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '复制' })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: '粘贴' })).toBeDisabled()
@@ -310,7 +350,7 @@ test('canvas context menu keeps every action visible and disables the unavailabl
 
   await page.mouse.click(1100, 760, { button: 'right' })
   await expect(menu).toBeVisible()
-  await expect(items).toHaveCount(7)
+  await expect(items).toHaveCount(8)
   for (const item of await items.all()) {
     await expect(item).toBeDisabled()
   }

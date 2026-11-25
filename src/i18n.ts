@@ -23,6 +23,13 @@ const MESSAGES = {
   'menu.duplicate': { zh: '创建副本', en: 'Duplicate' },
   'menu.delete': { zh: '删除', en: 'Delete' },
   'menu.deleteWire': { zh: '删除连线', en: 'Delete wire' },
+  'menu.align': { zh: '对齐', en: 'Align' },
+  'align.left': { zh: '左对齐', en: 'Align left' },
+  'align.hcenter': { zh: '水平居中', en: 'Center horizontally' },
+  'align.right': { zh: '右对齐', en: 'Align right' },
+  'align.top': { zh: '顶对齐', en: 'Align top' },
+  'align.vcenter': { zh: '垂直居中', en: 'Center vertically' },
+  'align.bottom': { zh: '底对齐', en: 'Align bottom' },
 
   'topbar.run': { zh: '运行', en: 'Run' },
   'topbar.stop': { zh: '停止', en: 'Stop' },

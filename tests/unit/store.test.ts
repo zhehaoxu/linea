@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nodeFrame } from '../../src/circuit/specs'
 import { createMemoryStorage } from './storage'
 
 const STORAGE_KEY = 'linea.circuit.v1'
@@ -269,5 +270,101 @@ describe('circuit history', () => {
 
     expect(store.circuit.nodes.map(node => node.id)).toEqual([source.id, lamp.id])
     expect(store.circuit.wires).toHaveLength(1)
+  })
+})
+
+describe('selection alignment', () => {
+  const edges = ['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'] as const
+  const edgeOf = {
+    left: (frame: { x: number; w: number }) => frame.x,
+    hcenter: (frame: { x: number; w: number }) => frame.x + frame.w / 2,
+    right: (frame: { x: number; w: number }) => frame.x + frame.w,
+    top: (frame: { y: number }) => frame.y,
+    vcenter: (frame: { y: number; h: number }) => frame.y + frame.h / 2,
+    bottom: (frame: { y: number; h: number }) => frame.y + frame.h,
+  }
+
+  for (const edge of edges) {
+    it(`aligns the selection to the ${edge} edge`, async () => {
+      const store = await loadStore()
+      const source = store.addNode('switch', 40, 20)
+      const screen = store.addNode('display', 260, 140)
+
+      store.circuit.selection = { nodes: [source.id, screen.id], wires: [] }
+      store.alignSelection(edge)
+
+      const sourceEdge = edgeOf[edge](nodeFrame(source))
+      const screenEdge = edgeOf[edge](nodeFrame(screen))
+      expect(Math.abs(sourceEdge - screenEdge)).toBeLessThanOrEqual(1)
+      expect(store.circuit.selection).toEqual({ nodes: [source.id, screen.id], wires: [] })
+    })
+  }
+
+  it('moves a fully selected group as one unit', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('lamp', 100, 0)
+    const third = store.addNode('switch', 300, 0)
+
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.groupSelection()
+    store.circuit.selection = { nodes: [first.id, second.id, third.id], wires: [] }
+    store.alignSelection('right')
+
+    expect(first).toMatchObject({ x: 206, y: 0 })
+    expect(second).toMatchObject({ x: 306, y: 0 })
+    expect(third).toMatchObject({ x: 300, y: 0 })
+    expect(second.x - first.x).toBe(100)
+  })
+
+  it('aligns members of a partially selected group individually', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('switch', 300, 0)
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.groupSelection()
+    const display = store.addNode('display', 100, 200)
+
+    store.circuit.selection = { nodes: [second.id, display.id], wires: [] }
+    store.alignSelection('left')
+
+    expect(second.x).toBe(100)
+    expect(display.x).toBe(100)
+    expect(first.x).toBe(0)
+  })
+
+  it('treats a lone group as a single unit', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('switch', 200, 0)
+    store.circuit.selection = { nodes: [first.id, second.id], wires: [] }
+    store.groupSelection()
+
+    expect(store.canAlignSelection()).toBe(false)
+
+    store.alignSelection('right')
+
+    expect(first).toMatchObject({ x: 0, y: 0 })
+    expect(second).toMatchObject({ x: 200, y: 0 })
+  })
+
+  it('uses one undo step for an alignment', async () => {
+    const store = await loadStore()
+    const source = store.addNode('switch', 0, 0)
+    const lamp = store.addNode('lamp', 200, 100)
+    store.circuit.selection = { nodes: [source.id, lamp.id], wires: [] }
+
+    store.alignSelection('right')
+
+    expect(source.x).toBe(194)
+
+    store.undo()
+
+    expect(store.circuit.nodes.find(node => node.id === source.id)).toMatchObject({ x: 0, y: 0 })
+    expect(store.circuit.nodes.find(node => node.id === lamp.id)).toMatchObject({ x: 200, y: 100 })
+
+    store.redo()
+
+    expect(store.circuit.nodes.find(node => node.id === source.id)?.x).toBe(194)
   })
 })

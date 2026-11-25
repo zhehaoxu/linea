@@ -11,6 +11,7 @@ import type {
 } from '../types'
 import type { CircuitData } from './persist'
 import { loadStoredCircuit, saveStoredCircuit } from './persist'
+import { nodeFrame } from './specs'
 
 let nodeSeq = 0
 let wireSeq = 0
@@ -320,6 +321,94 @@ export function ungroupSelection() {
     for (const id of group.nodes) nodes.add(id)
   }
   circuit.selection = { nodes: [...nodes], wires: [...selection.wires] }
+  recordHistory()
+}
+
+export type AlignEdge = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+
+interface AlignUnit {
+  ids: string[]
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+function unitBounds(ids: string[], nodes: CircuitNode[]): AlignUnit {
+  let left = Infinity
+  let top = Infinity
+  let right = -Infinity
+  let bottom = -Infinity
+  for (const node of nodes) {
+    const frame = nodeFrame(node)
+    left = Math.min(left, frame.x)
+    top = Math.min(top, frame.y)
+    right = Math.max(right, frame.x + frame.w)
+    bottom = Math.max(bottom, frame.y + frame.h)
+  }
+  return { ids, x: left, y: top, w: right - left, h: bottom - top }
+}
+
+function collectAlignUnits(selected: Set<string>): AlignUnit[] {
+  const nodeById = new Map(circuit.nodes.map(node => [node.id, node]))
+  const units: AlignUnit[] = []
+  const covered = new Set<string>()
+  for (const group of circuit.groups) {
+    if (!group.nodes.every(id => selected.has(id))) continue
+    const members = group.nodes.map(id => nodeById.get(id))
+    if (members.some(node => !node)) continue
+    units.push(unitBounds(group.nodes, members as CircuitNode[]))
+    for (const id of group.nodes) covered.add(id)
+  }
+  for (const node of circuit.nodes) {
+    if (!selected.has(node.id) || covered.has(node.id)) continue
+    units.push(unitBounds([node.id], [node]))
+  }
+  return units
+}
+
+export function canAlignSelection(): boolean {
+  const selection = circuit.selection
+  if (!selection || selection.nodes.length < 2) return false
+  return collectAlignUnits(new Set(selection.nodes)).length >= 2
+}
+
+export function alignSelection(edge: AlignEdge) {
+  const selection = circuit.selection
+  if (!selection || selection.nodes.length < 2) return
+  const units = collectAlignUnits(new Set(selection.nodes))
+  if (units.length < 2) return
+  const left = Math.min(...units.map(unit => unit.x))
+  const right = Math.max(...units.map(unit => unit.x + unit.w))
+  const top = Math.min(...units.map(unit => unit.y))
+  const bottom = Math.max(...units.map(unit => unit.y + unit.h))
+  const centerX = (left + right) / 2
+  const centerY = (top + bottom) / 2
+  const moves: { ids: string[]; dx: number; dy: number }[] = []
+  for (const unit of units) {
+    let dx = 0
+    let dy = 0
+    if (edge === 'left') dx = left - unit.x
+    else if (edge === 'hcenter') dx = centerX - (unit.x + unit.w / 2)
+    else if (edge === 'right') dx = right - (unit.x + unit.w)
+    else if (edge === 'top') dy = top - unit.y
+    else if (edge === 'vcenter') dy = centerY - (unit.y + unit.h / 2)
+    else dy = bottom - (unit.y + unit.h)
+    dx = Math.round(dx)
+    dy = Math.round(dy)
+    if (dx || dy) moves.push({ ids: unit.ids, dx, dy })
+  }
+  if (!moves.length) return
+  flushNudge()
+  const nodeById = new Map(circuit.nodes.map(node => [node.id, node]))
+  for (const move of moves) {
+    for (const id of move.ids) {
+      const node = nodeById.get(id)
+      if (!node) continue
+      node.x += move.dx
+      node.y += move.dy
+    }
+  }
   recordHistory()
 }
 

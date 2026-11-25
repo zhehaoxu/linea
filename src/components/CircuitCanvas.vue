@@ -4,6 +4,8 @@ import CircuitNode from './CircuitNode.vue'
 import {
   addNode,
   addText,
+  alignSelection,
+  canAlignSelection,
   circuit,
   clipboardState,
   connect,
@@ -22,9 +24,11 @@ import {
   toggleNode,
   ungroupSelection,
 } from '../circuit/store'
+import type { AlignEdge } from '../circuit/store'
 import { NODE_SPECS, nodeFrame, portPointOf, textMetrics, wirePath } from '../circuit/specs'
 import { advance, createRuntime, simulate, type Simulation } from '../circuit/simulate'
 import { t, modLabel } from '../i18n'
+import type { MessageKey } from '../i18n'
 import type {
   BasicNodeType,
   Bit,
@@ -84,8 +88,8 @@ let autoFit = true
 let observer: ResizeObserver | null = null
 
 type MenuTarget = { kind: 'node'; id: string } | { kind: 'wire'; id: string } | { kind: 'canvas' }
-type MenuAction = 'group' | 'ungroup' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
-type MenuIcon = 'group' | 'ungroup' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
+type MenuAction = 'group' | 'ungroup' | 'align' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
+type MenuIcon = 'group' | 'ungroup' | 'align' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete'
 
 interface MenuItem {
   id: MenuAction
@@ -96,6 +100,13 @@ interface MenuItem {
   disabled?: boolean
   separatorBefore?: boolean
 }
+
+interface AlignMenuItem {
+  edge: AlignEdge
+  label: string
+}
+
+const ALIGN_EDGES: AlignEdge[] = ['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom']
 
 interface GroupBox {
   id: string
@@ -109,6 +120,9 @@ interface GroupBox {
 const menu = ref<{ x: number; y: number; target: MenuTarget } | null>(null)
 const menuEl = ref<HTMLDivElement | null>(null)
 const menuPos = ref({ left: 0, top: 0 })
+const alignOpen = ref(false)
+const alignEl = ref<HTMLDivElement | null>(null)
+const alignPos = ref({ left: 0, top: 0 })
 
 const selectedNodeIds = computed(() => new Set(circuit.selection?.nodes ?? []))
 const touchedGroups = computed(() =>
@@ -123,6 +137,10 @@ const canGroupSelection = computed(() => {
   return !(group.nodes.length === count && group.nodes.every(id => selectedNodeIds.value.has(id)))
 })
 const canUngroupSelection = computed(() => touchedGroups.value.length > 0)
+const canAlign = computed(() => canAlignSelection())
+const alignItems = computed<AlignMenuItem[]>(() =>
+  ALIGN_EDGES.map(edge => ({ edge, label: t(`align.${edge}` as MessageKey) })),
+)
 
 const menuItems = computed<MenuItem[]>(() => {
   const target = menu.value?.target
@@ -143,6 +161,12 @@ const menuItems = computed<MenuItem[]>(() => {
       label: t('menu.ungroup'),
       icon: 'ungroup',
       disabled: !isNode || !canUngroupSelection.value,
+    },
+    {
+      id: 'align',
+      label: t('menu.align'),
+      icon: 'align',
+      disabled: !canAlign.value,
     },
     {
       id: 'cut',
@@ -209,24 +233,108 @@ function placeMenu() {
 
 function openMenu(x: number, y: number, target: MenuTarget) {
   menu.value = { x, y, target }
+  alignOpen.value = false
   nextTick(() => {
     placeMenu()
-    menuEl.value?.querySelector<HTMLButtonElement>('.ctx-item:not(:disabled)')?.focus({ preventScroll: true })
+    menuEl.value?.querySelector<HTMLButtonElement>(':scope > .ctx-item:not(:disabled)')?.focus({ preventScroll: true })
   })
 }
 
 function closeMenu(restoreFocus = true) {
   if (!menu.value) return
+  alignOpen.value = false
   menu.value = null
   if (restoreFocus) {
     nextTick(() => stage.value?.focus({ preventScroll: true }))
   }
 }
 
+function alignParent(): HTMLButtonElement | null {
+  return menuEl.value?.querySelector<HTMLButtonElement>('[data-menu="align"]') ?? null
+}
+
+function placeAlignMenu() {
+  const el = alignEl.value
+  const anchor = alignParent()
+  if (!el || !anchor || !menuEl.value) return
+  const gap = 8
+  const menuRect = menuEl.value.getBoundingClientRect()
+  const anchorRect = anchor.getBoundingClientRect()
+  const flip = anchorRect.right + 4 + el.offsetWidth > window.innerWidth - gap
+  const left = flip
+    ? anchorRect.left - menuRect.left - el.offsetWidth - 4
+    : menuEl.value.clientWidth + 4
+  const top = clamp(
+    anchorRect.top - menuRect.top - 5,
+    gap - menuRect.top,
+    window.innerHeight - gap - el.offsetHeight - menuRect.top,
+  )
+  alignPos.value = { left: Math.max(gap - menuRect.left, left), top }
+}
+
+function openAlignMenu(focusFirst = false) {
+  const anchor = alignParent()
+  if (!anchor || anchor.disabled) return
+  alignOpen.value = true
+  nextTick(() => {
+    placeAlignMenu()
+    if (focusFirst) {
+      alignEl.value
+        ?.querySelector<HTMLButtonElement>('.ctx-item:not(:disabled)')
+        ?.focus({ preventScroll: true })
+    }
+  })
+}
+
+function closeAlignMenu(focusParent = false) {
+  if (!alignOpen.value) return
+  alignOpen.value = false
+  if (focusParent) nextTick(() => alignParent()?.focus({ preventScroll: true }))
+}
+
+function onMenuItemEnter(item: MenuItem) {
+  if (item.id === 'align') openAlignMenu()
+  else alignOpen.value = false
+}
+
+function runAlign(edge: AlignEdge) {
+  closeMenu()
+  alignSelection(edge)
+}
+
+function onAlignKeydown(ev: KeyboardEvent) {
+  if (!alignEl.value) return
+  if (ev.key === 'Escape' || ev.key === 'ArrowLeft') {
+    ev.preventDefault()
+    ev.stopPropagation()
+    closeAlignMenu(true)
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  const items = [...alignEl.value.querySelectorAll<HTMLButtonElement>('.ctx-item:not(:disabled)')]
+  if (!items.length) return
+  const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement)
+  let nextIndex = 0
+  if (ev.key === 'End') nextIndex = items.length - 1
+  else if (ev.key !== 'Home') {
+    const delta = ev.key === 'ArrowDown' ? 1 : -1
+    nextIndex = activeIndex < 0 ? 0 : (activeIndex + delta + items.length) % items.length
+  }
+  items[nextIndex]?.focus({ preventScroll: true })
+}
+
 function onMenuKeydown(ev: KeyboardEvent) {
   if (!menuEl.value) return
+  if (ev.key === 'ArrowRight' && alignParent() === document.activeElement && !alignOpen.value) {
+    ev.preventDefault()
+    ev.stopPropagation()
+    openAlignMenu(true)
+    return
+  }
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return
-  const items = [...menuEl.value.querySelectorAll<HTMLButtonElement>('.ctx-item:not(:disabled)')]
+  const items = [...menuEl.value.querySelectorAll<HTMLButtonElement>(':scope > .ctx-item:not(:disabled)')]
   if (!items.length) return
   ev.preventDefault()
   ev.stopPropagation()
@@ -237,6 +345,7 @@ function onMenuKeydown(ev: KeyboardEvent) {
     const delta = ev.key === 'ArrowDown' ? 1 : -1
     nextIndex = activeIndex < 0 ? 0 : (activeIndex + delta + items.length) % items.length
   }
+  if (alignOpen.value) alignOpen.value = false
   items[nextIndex]?.focus({ preventScroll: true })
 }
 
@@ -1254,7 +1363,11 @@ defineExpose({
               :class="{ danger: item.danger }"
               role="menuitem"
               :disabled="item.disabled"
-              @click="runMenu(item.id)"
+              :data-menu="item.id"
+              :aria-haspopup="item.id === 'align' ? 'menu' : undefined"
+              :aria-expanded="item.id === 'align' ? alignOpen : undefined"
+              @click="item.id === 'align' ? openAlignMenu(true) : runMenu(item.id)"
+              @mouseenter="onMenuItemEnter(item)"
             >
               <svg viewBox="0 0 24 24" class="ctx-icon" aria-hidden="true">
                 <template v-if="item.icon === 'group'">
@@ -1266,6 +1379,9 @@ defineExpose({
                   <rect x="4" y="4" width="7" height="7" rx="1.5" />
                   <rect x="13" y="13" width="7" height="7" rx="1.5" />
                   <path d="M13.5 5.5h4v4M10.5 18.5h-4v-4" />
+                </template>
+                <template v-else-if="item.icon === 'align'">
+                  <path d="M4 4v16M7 8h11M7 16h7" />
                 </template>
                 <template v-else-if="item.icon === 'cut'">
                   <circle cx="6.5" cy="6.5" r="2.5" />
@@ -1292,8 +1408,51 @@ defineExpose({
               </svg>
               <span>{{ item.label }}</span>
               <span v-if="item.shortcut" class="ctx-shortcut">{{ item.shortcut }}</span>
+              <svg v-if="item.id === 'align'" viewBox="0 0 24 24" class="ctx-caret" aria-hidden="true">
+                <path d="m9.5 6 6 6-6 6" />
+              </svg>
             </button>
           </template>
+          <div
+            v-if="alignOpen"
+            ref="alignEl"
+            class="ctx-submenu"
+            role="menu"
+            :aria-label="t('menu.align')"
+            :style="{ left: `${alignPos.left}px`, top: `${alignPos.top}px` }"
+            @keydown="onAlignKeydown"
+          >
+            <button
+              v-for="item in alignItems"
+              :key="item.edge"
+              class="ctx-item"
+              role="menuitem"
+              :data-align="item.edge"
+              @click="runAlign(item.edge)"
+            >
+              <svg viewBox="0 0 24 24" class="ctx-icon" aria-hidden="true">
+                <template v-if="item.edge === 'left'">
+                  <path d="M4 4v16M7 8h11M7 16h7" />
+                </template>
+                <template v-else-if="item.edge === 'hcenter'">
+                  <path d="M12 3v18M6 8h12M8 16h8" />
+                </template>
+                <template v-else-if="item.edge === 'right'">
+                  <path d="M20 4v16M6 8h11M10 16h7" />
+                </template>
+                <template v-else-if="item.edge === 'top'">
+                  <path d="M4 4h16M8 7v11M16 7v7" />
+                </template>
+                <template v-else-if="item.edge === 'vcenter'">
+                  <path d="M3 12h18M8 6v12M16 8v8" />
+                </template>
+                <template v-else>
+                  <path d="M4 20h16M8 6v11M16 10v7" />
+                </template>
+              </svg>
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
         </div>
       </Transition>
     </Teleport>
@@ -1418,7 +1577,8 @@ defineExpose({
   pointer-events: none;
 }
 
-.ctx-menu {
+.ctx-menu,
+.ctx-submenu {
   position: fixed;
   z-index: 50;
   min-width: 176px;
@@ -1431,6 +1591,16 @@ defineExpose({
     var(--shadow-soft);
   backdrop-filter: blur(18px);
   user-select: none;
+}
+
+.ctx-submenu {
+  position: absolute;
+  z-index: 51;
+  min-width: 156px;
+}
+
+.ctx-submenu .ctx-item {
+  white-space: nowrap;
 }
 
 .ctx-item {
@@ -1490,6 +1660,18 @@ defineExpose({
   color: var(--ink-faint);
   font-size: 10.5px;
   letter-spacing: 0.2px;
+}
+
+.ctx-caret {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  flex: none;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ctx-sep {
