@@ -343,7 +343,9 @@ const redoTip = computed(() => t('topbar.redo', { shiftMod: shiftModLabel }))
 }
 
 .icon-btn:hover::after,
-.zoom button:hover::after {
+.icon-btn:focus-visible::after,
+.zoom button:hover::after,
+.zoom button:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%) scale(1);
 }

@@ -72,6 +72,39 @@ describe('circuit history', () => {
     })
   })
 
+  it('keeps the same wire when reconnecting identical endpoints', async () => {
+    const store = await loadStore()
+    const source = store.addNode('switch', 0, 0)
+    const lamp = store.addNode('lamp', 160, 0)
+    const from = { nodeId: source.id, port: 'out' }
+    const to = { nodeId: lamp.id, port: 'a' }
+    store.connect(from, to)
+    const original = store.circuit.wires[0]
+    store.circuit.selection = { nodes: [], wires: [original.id] }
+
+    store.connect(from, to)
+
+    expect(store.circuit.wires).toEqual([original])
+    expect(store.circuit.selection).toEqual({ nodes: [], wires: [original.id] })
+  })
+
+  it('drops a stale wire selection when its source is reconnected', async () => {
+    const store = await loadStore()
+    const first = store.addNode('switch', 0, 0)
+    const second = store.addNode('switch', 80, 0)
+    const lamp = store.addNode('lamp', 160, 0)
+    const to = { nodeId: lamp.id, port: 'a' }
+    store.connect({ nodeId: first.id, port: 'out' }, to)
+    const original = store.circuit.wires[0]
+    store.circuit.selection = { nodes: [], wires: [original.id] }
+
+    store.connect({ nodeId: second.id, port: 'out' }, to)
+
+    expect(store.circuit.wires).toHaveLength(1)
+    expect(store.circuit.wires[0].from.nodeId).toBe(second.id)
+    expect(store.circuit.selection).toBeNull()
+  })
+
   it('pastes only internal wires and remaps their endpoints', async () => {
     const store = await loadStore()
     const source = store.addNode('switch', 0, 0)

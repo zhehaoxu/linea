@@ -276,8 +276,13 @@ export function removeWire(id: string) {
 export function connect(from: WireEnd, to: WireEnd) {
   if (from.nodeId === to.nodeId) return
   flushNudge()
-  circuit.wires = circuit.wires.filter(wire => !(wire.to.nodeId === to.nodeId && wire.to.port === to.port))
+  const existing = circuit.wires.find(
+    wire => wire.to.nodeId === to.nodeId && wire.to.port === to.port,
+  )
+  if (existing && existing.from.nodeId === from.nodeId && existing.from.port === from.port) return
+  circuit.wires = circuit.wires.filter(wire => wire !== existing)
   circuit.wires.push({ id: `w${++wireSeq}`, from: { ...from }, to: { ...to } })
+  pruneSelection()
   recordHistory()
 }
 

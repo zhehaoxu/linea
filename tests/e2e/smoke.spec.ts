@@ -898,6 +898,45 @@ test('focused nodes activate with Enter and Space', async ({ page }) => {
   await expect(n1.locator('.selected-outline')).toHaveCount(0)
 })
 
+test('a tiny pointer movement clicks without moving the node', async ({ page }) => {
+  const node = page.locator('.stage .node[data-id="a"]')
+  const box = await node.boundingBox()
+  if (!box) throw new Error('switch missing')
+  const transform = await node.getAttribute('transform')
+  const startX = box.x + box.width / 2
+  const startY = box.y + box.height / 2
+
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + 2, startY + 1)
+  await page.mouse.up()
+
+  await expect(node).toHaveAttribute('transform', transform ?? '')
+  await expect(node.locator('.knob')).toHaveAttribute('cx', '13.5')
+})
+
+test('text nodes edit with Enter and keep the editor open during IME composition', async ({ page }) => {
+  await page.mouse.dblclick(1100, 760)
+  const editor = page.locator('.text-editor')
+  await expect(editor).toBeVisible()
+  await editor.fill('标注')
+  await page.keyboard.press('Enter')
+  await expect(editor).toBeHidden()
+
+  const textNode = page.locator('.stage .node').filter({ hasText: '标注' })
+  await expect(textNode).toHaveCount(1)
+  await textNode.focus()
+  await page.keyboard.press('Enter')
+  await expect(editor).toBeVisible()
+  await expect(editor).toHaveValue('标注')
+
+  await editor.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true })
+  await expect(editor).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(editor).toBeHidden()
+  await expect(textNode).toHaveCount(1)
+})
+
 test('a fresh visit starts with an empty canvas', async ({ page }) => {
   await page.evaluate(() => localStorage.clear())
   await page.reload()

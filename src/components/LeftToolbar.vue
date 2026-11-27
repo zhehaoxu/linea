@@ -46,7 +46,7 @@ const CATEGORIES: Category[] = [
     icon: 'lamp',
     items: [
       { type: 'lamp', labelKey: 'node.lamp' },
-      { type: 'display', labelKey: 'node.display4' },
+      { type: 'display', labelKey: 'node.display' },
     ],
   },
   {
@@ -241,6 +241,7 @@ onBeforeUnmount(() => {
       class="tool"
       :data-label="t('tool.select')"
       :aria-label="t('tool.select')"
+      :aria-pressed="circuit.tool === 'select'"
       :class="{ active: circuit.tool === 'select' }"
       @click="chooseTool('select')"
     >
@@ -252,6 +253,7 @@ onBeforeUnmount(() => {
       class="tool"
       :data-label="t('tool.pan')"
       :aria-label="t('tool.pan')"
+      :aria-pressed="circuit.tool === 'pan'"
       :class="{ active: circuit.tool === 'pan' }"
       @click="chooseTool('pan')"
     >
@@ -418,13 +420,10 @@ onBeforeUnmount(() => {
     transform 0.12s;
 }
 
-.tool:hover::after {
+.tool:hover::after,
+.tool:focus-visible::after {
   opacity: 1;
   transform: translateY(-50%) scale(1);
-}
-
-.tool.active::after {
-  opacity: 0;
 }
 
 .icon {

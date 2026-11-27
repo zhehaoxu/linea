@@ -34,7 +34,6 @@ import type { AlignEdge } from '../circuit/store'
 import { NODE_SPECS, nodeFrame, portPointOf, textMetrics, wirePath } from '../circuit/specs'
 import { advance, createRuntime, simulate, type Simulation } from '../circuit/simulate'
 import { t, modLabel, shiftLabel } from '../i18n'
-import type { MessageKey } from '../i18n'
 import type {
   BasicNodeType,
   Bit,
@@ -88,6 +87,8 @@ const marquee = ref<MarqueeState | null>(null)
 const wiring = ref<{ from: WireEnd; x: number; y: number } | null>(null)
 const hoverIn = ref<WireEnd | null>(null)
 const TICK = 50
+const EMPTY_PORTS: string[] = []
+const EMPTY_VALUES: Record<string, Bit> = {}
 let runtime = createRuntime()
 let timer: number | undefined
 let cascade = 0
@@ -111,7 +112,6 @@ type MenuIcon =
   | 'ungroup'
   | 'align'
   | 'collapse'
-  | 'expand'
   | 'unfold'
   | 'rename'
   | 'cut'
@@ -154,6 +154,17 @@ const alignEl = ref<HTMLDivElement | null>(null)
 const alignPos = ref({ left: 0, top: 0 })
 
 const selectedNodeIds = computed(() => new Set(circuit.selection?.nodes ?? []))
+const selectedWireIds = computed(() => new Set(circuit.selection?.wires ?? []))
+const nodeById = computed(() => new Map(circuit.nodes.map(node => [node.id, node])))
+const groupByNode = computed(() => {
+  const map = new Map<string, CircuitGroup>()
+  for (const group of circuit.groups) {
+    for (const id of group.nodes) {
+      if (!map.has(id)) map.set(id, group)
+    }
+  }
+  return map
+})
 const touchedGroups = computed(() =>
   circuit.groups.filter(group => group.nodes.some(id => selectedNodeIds.value.has(id))),
 )
@@ -168,7 +179,7 @@ const canGroupSelection = computed(() => {
 const canUngroupSelection = computed(() => touchedGroups.value.length > 0)
 const canAlign = computed(() => canAlignSelection())
 const alignItems = computed<AlignMenuItem[]>(() =>
-  ALIGN_EDGES.map(edge => ({ edge, label: t(`align.${edge}` as MessageKey) })),
+  ALIGN_EDGES.map(edge => ({ edge, label: t(`align.${edge}`) })),
 )
 const selectionCollapse = computed(() => collapseMode())
 const renameTarget = computed<CircuitFold | null>(() => {
@@ -499,15 +510,15 @@ function startPan(ev: PointerEvent) {
 }
 
 function isNodeSelected(id: string): boolean {
-  return circuit.selection?.nodes.includes(id) ?? false
+  return selectedNodeIds.value.has(id)
 }
 
 function isWireSelected(id: string): boolean {
-  return circuit.selection?.wires.includes(id) ?? false
+  return selectedWireIds.value.has(id)
 }
 
 function groupForNode(id: string): CircuitGroup | undefined {
-  return circuit.groups.find(group => group.nodes.includes(id))
+  return groupByNode.value.get(id)
 }
 
 function selectionIdsForNode(id: string): string[] {
@@ -528,7 +539,7 @@ function nodesFrame(ids: string[], pad = 10): GroupFrame | null {
   let maxY = -Infinity
   let count = 0
   for (const id of ids) {
-    const node = circuit.nodes.find(item => item.id === id)
+    const node = nodeById.value.get(id)
     if (!node) continue
     const frame = nodeFrame(node)
     minX = Math.min(minX, frame.x)
@@ -627,9 +638,10 @@ function isNodeFullySelected(id: string): boolean {
 
 function activateNode(id: string) {
   circuit.selection = { nodes: [...selectionIdsForNode(id)], wires: [] }
-  const node = circuit.nodes.find(item => item.id === id)
+  const node = nodeById.value.get(id)
   if (node?.type === 'switch') toggleNode(id)
   else if (node?.type === 'clock') cycleClockFreq(id)
+  else if (node?.type === 'text') beginEdit(id)
 }
 
 function toggleNodeSelection(id: string) {
@@ -819,12 +831,12 @@ function onSvgMove(ev: PointerEvent) {
   if (drag.value) {
     const current = drag.value
     if (Math.hypot(ev.clientX - current.sx, ev.clientY - current.sy) > 3) current.moved = true
+    if (!current.moved) return
     const point = toWorld(ev.clientX, ev.clientY)
     const dx = point.x - current.wx
     const dy = point.y - current.wy
-    const byId = new Map(circuit.nodes.map(item => [item.id, item]))
     for (const origin of current.origins) {
-      const node = byId.get(origin.id)
+      const node = nodeById.value.get(origin.id)
       if (!node) continue
       node.x = Math.round(origin.x + dx)
       node.y = Math.round(origin.y + dy)
@@ -1144,18 +1156,13 @@ function cancelEdit() {
   else node.text = current.original
 }
 
-function onEditorInput(ev: Event) {
-  const value = (ev.target as HTMLTextAreaElement).value
-  if (editValue.value !== value) editValue.value = value
-}
-
 function onEditorKey(ev: KeyboardEvent) {
   if (ev.key === 'Escape') {
     ev.preventDefault()
     cancelEdit()
     return
   }
-  if (ev.key === 'Enter' && !ev.shiftKey) {
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
     ev.preventDefault()
     commitEdit()
   }
@@ -1191,7 +1198,7 @@ function onRenameKey(ev: KeyboardEvent) {
     cancelRename()
     return
   }
-  if (ev.key === 'Enter') {
+  if (ev.key === 'Enter' && !ev.isComposing) {
     ev.preventDefault()
     commitRename()
   }
@@ -1466,8 +1473,8 @@ interface WireDraft {
   bPoint: Vec
 }
 
-const wireViews = computed(() => {
-  const byId = new Map(circuit.nodes.map(node => [node.id, node]))
+const wireGeometry = computed(() => {
+  const byId = nodeById.value
   const foldByNode = collapsedFoldByNode.value
   const blockById = collapsedBlockById.value
 
@@ -1531,10 +1538,17 @@ const wireViews = computed(() => {
   return drafts.map(draft => ({
     id: draft.id,
     d: wirePath(draft.aPoint, draft.bPoint),
-    selected: isWireSelected(draft.id),
-    on: sim.value?.wires.get(draft.id) === 1,
   }))
 })
+
+const wireViews = computed(() =>
+  wireGeometry.value.map(wire => ({
+    id: wire.id,
+    d: wire.d,
+    selected: isWireSelected(wire.id),
+    on: sim.value?.wires.get(wire.id) === 1,
+  })),
+)
 
 const ghost = computed(() => {
   const current = wiring.value
@@ -1560,14 +1574,11 @@ const marqueeBox = computed(() => {
 })
 
 const occupied = computed(() => {
-  const map = new Map<string, Set<string>>()
+  const map = new Map<string, string[]>()
   for (const wire of circuit.wires) {
-    let set = map.get(wire.to.nodeId)
-    if (!set) {
-      set = new Set()
-      map.set(wire.to.nodeId, set)
-    }
-    set.add(wire.to.port)
+    const list = map.get(wire.to.nodeId)
+    if (list) list.push(wire.to.port)
+    else map.set(wire.to.nodeId, [wire.to.port])
   }
   return map
 })
@@ -1582,40 +1593,62 @@ const outUsed = computed(() => {
   return map
 })
 
+interface NodeSignals {
+  type: NodeType
+  ins: Record<string, Bit>
+  outs: Record<string, Bit>
+}
+
+let signalSim: Simulation | null = null
+let signalNodes: CircuitNodeData[] | null = null
+let signalCache = new Map<string, NodeSignals>()
+
+const nodeSignals = computed(() => {
+  const current = sim.value
+  const nodes = circuit.nodes
+  if (current === signalSim && nodes === signalNodes && nodes.length === signalCache.size) {
+    return signalCache
+  }
+
+  const next = new Map<string, NodeSignals>()
+  for (const node of nodes) {
+    const previous = signalCache.get(node.id)
+    const ins: Record<string, Bit> = {}
+    const outs: Record<string, Bit> = {}
+    if (current) {
+      for (const port of NODE_SPECS[node.type].ins) {
+        const value = current.ins.get(`${node.id}:${port.id}`)
+        if (value !== undefined) ins[port.id] = value
+      }
+      for (const port of NODE_SPECS[node.type].outs) {
+        const value = current.outs.get(`${node.id}:${port.id}`)
+        if (value !== undefined) outs[port.id] = value
+      }
+    }
+    const spec = NODE_SPECS[node.type]
+    const unchanged =
+      previous?.type === node.type &&
+      spec.ins.every(port => previous.ins[port.id] === ins[port.id]) &&
+      spec.outs.every(port => previous.outs[port.id] === outs[port.id])
+    next.set(node.id, unchanged ? previous : { type: node.type, ins, outs })
+  }
+  signalSim = current
+  signalNodes = nodes
+  signalCache = next
+  return next
+})
+
 function connectedIns(nodeId: string): string[] {
-  const set = occupied.value.get(nodeId)
-  return set ? [...set] : []
+  return occupied.value.get(nodeId) ?? EMPTY_PORTS
 }
 
 function connectedOuts(nodeId: string): string[] {
-  return outUsed.value.get(nodeId) ?? []
+  return outUsed.value.get(nodeId) ?? EMPTY_PORTS
 }
 
 function hoverPortOf(nodeId: string): string | null {
   const current = hoverIn.value
   return current && current.nodeId === nodeId ? current.port : null
-}
-
-function inValuesFor(node: CircuitNodeData): Record<string, Bit> {
-  const values: Record<string, Bit> = {}
-  const current = sim.value
-  if (!current) return values
-  for (const port of NODE_SPECS[node.type].ins) {
-    const value = current.ins.get(`${node.id}:${port.id}`)
-    if (value !== undefined) values[port.id] = value
-  }
-  return values
-}
-
-function outValuesFor(node: CircuitNodeData): Record<string, Bit> {
-  const values: Record<string, Bit> = {}
-  const current = sim.value
-  if (!current) return values
-  for (const port of NODE_SPECS[node.type].outs) {
-    const value = current.outs.get(`${node.id}:${port.id}`)
-    if (value !== undefined) values[port.id] = value
-  }
-  return values
 }
 
 onMounted(() => {
@@ -1688,6 +1721,7 @@ defineExpose({
         <g
           v-for="wire in wireViews"
           :key="wire.id"
+          v-memo="[wire.d, wire.selected, wire.on]"
           @pointerdown="onWireDown($event, wire.id)"
           @contextmenu.stop.prevent="onWireMenu($event, wire.id)"
         >
@@ -1762,8 +1796,8 @@ defineExpose({
           :running="circuit.running"
           :editing="editing?.id === node.id"
           :editing-text="editing?.id === node.id ? editValue : undefined"
-          :in-values="inValuesFor(node)"
-          :out-values="outValuesFor(node)"
+          :in-values="nodeSignals.get(node.id)?.ins ?? EMPTY_VALUES"
+          :out-values="nodeSignals.get(node.id)?.outs ?? EMPTY_VALUES"
           @bodydown="onNodeDown"
           @portdown="onPortDown"
           @edit="beginEdit"
@@ -1842,7 +1876,6 @@ defineExpose({
         paddingLeft: `${editBox.paddingLeft}px`,
       }"
       @pointerdown.stop
-      @input="onEditorInput"
       @keydown.stop="onEditorKey"
       @blur="commitEdit"
     />
@@ -1912,10 +1945,6 @@ defineExpose({
                 <template v-else-if="item.icon === 'collapse'">
                   <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
                   <path d="M7.5 12h9" />
-                </template>
-                <template v-else-if="item.icon === 'expand'">
-                  <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
-                  <path d="M12 7.5v9M7.5 12h9" />
                 </template>
                 <template v-else-if="item.icon === 'unfold'">
                   <rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-dasharray="3 2.4" />
