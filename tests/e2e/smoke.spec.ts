@@ -1,12 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { TEMPLATES } from '../../src/circuit/templates'
-import type { CircuitData } from '../../src/circuit/persist'
 
-const HALF_ADDER = JSON.stringify(TEMPLATES.find(template => template.id === 'half-adder')?.data ?? {
-  nodes: [],
-  wires: [],
-} satisfies CircuitData)
+const HALF_ADDER = readFileSync(new URL('../../public/templates/half-adder.json', import.meta.url), 'utf8')
 
 async function createFold(page: Page, nodes: Locator, indexes: number[]) {
   await nodes.nth(indexes[0]).click()
@@ -60,6 +55,128 @@ test('toolbar flyout works from the keyboard', async ({ page }) => {
 
   await page.keyboard.press('ControlOrMeta+z')
   await expect(page.locator('.stage .node')).toHaveCount(nodeCount)
+})
+
+test('more circuit templates load from JSON files only when selected', async ({ page }) => {
+  const circuitRequests: string[] = []
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (/^\/templates\/[^/]+\.json$/.test(path) && !path.endsWith('/index.json')) {
+      circuitRequests.push(path)
+    }
+  })
+  await page.reload()
+
+  const trigger = page.getByRole('button', { name: '电路模板', exact: true })
+  await trigger.click()
+  const panel = page.getByRole('group', { name: '电路模板' })
+  await expect(panel.locator('.template-item')).toHaveCount(5)
+  expect(circuitRequests).toEqual([])
+
+  await panel.getByRole('button', { name: '更多', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '更多电路模板' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.gallery-card')).toHaveCount(6)
+  expect(circuitRequests).toEqual([])
+
+  let releaseTemplate!: () => void
+  const templateGate = new Promise<void>(resolve => {
+    releaseTemplate = resolve
+  })
+  await page.route('**/templates/mux-4-1.json', async route => {
+    await templateGate
+    await route.continue()
+  })
+
+  const card = dialog.locator('[data-template="mux-4-1"]')
+  await card.click()
+  await expect(card).toContainText('正在载入…')
+  await expect(card).toBeDisabled()
+  await expect(dialog.locator('.gallery-card').nth(1)).toBeDisabled()
+  releaseTemplate()
+
+  await expect(dialog).toBeHidden()
+  await expect(page.locator('.stage .node')).toHaveCount(25)
+  await expect(trigger).toBeFocused()
+  expect(circuitRequests).toEqual(['/templates/mux-4-1.json'])
+
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.locator('.stage .node')).toHaveCount(10)
+})
+
+test('more template dialog closes with Escape and restores focus', async ({ page }) => {
+  await page.getByRole('button', { name: '电路模板', exact: true }).click()
+  const panel = page.getByRole('group', { name: '电路模板' })
+  const more = panel.getByRole('button', { name: '更多', exact: true })
+  await more.click()
+
+  const dialog = page.getByRole('dialog', { name: '更多电路模板' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.gallery-card').first()).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(more).toBeFocused()
+  await expect(panel).toBeVisible()
+})
+
+test('template loading errors can be retried', async ({ page }) => {
+  await page.route('**/templates/index.json', route => route.abort())
+  await page.reload()
+  await page.getByRole('button', { name: '电路模板', exact: true }).click()
+  const panel = page.getByRole('group', { name: '电路模板' })
+  await expect(panel.getByRole('alert')).toHaveText('电路模板加载失败')
+
+  await page.unroute('**/templates/index.json')
+  await panel.getByRole('button', { name: '重试', exact: true }).click()
+  await expect(panel.locator('.template-item')).toHaveCount(5)
+  await expect(panel.getByRole('button', { name: /半加器/ })).toBeVisible()
+})
+
+test('a failed circuit file can be retried without losing the template list', async ({ page }) => {
+  await page.route('**/templates/mux-4-1.json', route => route.abort())
+  await page.reload()
+  await page.getByRole('button', { name: '电路模板', exact: true }).click()
+  await page.getByRole('group', { name: '电路模板' }).getByRole('button', { name: '更多', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: '更多电路模板' })
+  const card = dialog.locator('[data-template="mux-4-1"]')
+  await card.click()
+
+  await expect(card).toContainText('载入失败，点击重试')
+  await expect(card).toBeEnabled()
+  await expect(card).toBeFocused()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.gallery-card')).toHaveCount(6)
+  await expect(page.locator('.stage .node')).toHaveCount(10)
+
+  await page.unroute('**/templates/mux-4-1.json')
+  await card.click()
+  await expect(dialog).toBeHidden()
+  await expect(page.locator('.stage .node')).toHaveCount(25)
+})
+
+test('a quick template failure stays local and can be retried', async ({ page }) => {
+  const fullAdder = JSON.parse(
+    readFileSync(new URL('../../public/templates/full-adder.json', import.meta.url), 'utf8'),
+  ) as { nodes: unknown[] }
+  await page.route('**/templates/full-adder.json', route => route.abort())
+  await page.reload()
+  await page.getByRole('button', { name: '电路模板', exact: true }).click()
+
+  const panel = page.getByRole('group', { name: '电路模板' })
+  const item = panel.locator('[data-template-id="full-adder"]')
+  await item.click()
+
+  await expect(item).toContainText('载入失败，点击重试')
+  await expect(item).toBeEnabled()
+  await expect(item).toBeFocused()
+  await expect(panel.locator('.template-item')).toHaveCount(5)
+  await expect(page.locator('.stage .node')).toHaveCount(10)
+
+  await page.unroute('**/templates/full-adder.json')
+  await item.click()
+  await expect(panel).toBeHidden()
+  await expect(page.locator('.stage .node')).toHaveCount(fullAdder.nodes.length)
 })
 
 test('canvas shortcuts select all, clear selection, fit, and zoom', async ({ page }) => {

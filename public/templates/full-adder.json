@@ -1,0 +1,37 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "a", "type": "switch", "x": 60, "y": 50, "value": 1 },
+    { "id": "b", "type": "switch", "x": 60, "y": 160, "value": 0 },
+    { "id": "cin", "type": "switch", "x": 60, "y": 330, "value": 0 },
+    { "id": "xor1", "type": "xor", "x": 300, "y": 30, "value": 0 },
+    { "id": "xor2", "type": "xor", "x": 560, "y": 60, "value": 0 },
+    { "id": "and1", "type": "and", "x": 300, "y": 270, "value": 0 },
+    { "id": "and2", "type": "and", "x": 560, "y": 270, "value": 0 },
+    { "id": "or", "type": "or", "x": 760, "y": 170, "value": 0 },
+    { "id": "sum", "type": "lamp", "x": 880, "y": 50, "value": 0 },
+    { "id": "cout", "type": "lamp", "x": 880, "y": 235, "value": 0 },
+    { "id": "label-a", "type": "text", "x": 60, "y": 16, "value": 0, "text": "A" },
+    { "id": "label-b", "type": "text", "x": 60, "y": 126, "value": 0, "text": "B" },
+    { "id": "label-cin", "type": "text", "x": 60, "y": 296, "value": 0, "text": "Cin" },
+    { "id": "label-sum", "type": "text", "x": 880, "y": 8, "value": 0, "text": "S" },
+    { "id": "label-cout", "type": "text", "x": 880, "y": 191, "value": 0, "text": "Cout" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "a", "port": "out" }, "to": { "nodeId": "xor1", "port": "a" } },
+    { "id": "w2", "from": { "nodeId": "b", "port": "out" }, "to": { "nodeId": "xor1", "port": "b" } },
+    { "id": "w3", "from": { "nodeId": "a", "port": "out" }, "to": { "nodeId": "and1", "port": "a" } },
+    { "id": "w4", "from": { "nodeId": "b", "port": "out" }, "to": { "nodeId": "and1", "port": "b" } },
+    { "id": "w5", "from": { "nodeId": "xor1", "port": "out" }, "to": { "nodeId": "xor2", "port": "a" } },
+    { "id": "w6", "from": { "nodeId": "xor1", "port": "out" }, "to": { "nodeId": "and2", "port": "a" } },
+    { "id": "w7", "from": { "nodeId": "cin", "port": "out" }, "to": { "nodeId": "xor2", "port": "b" } },
+    { "id": "w8", "from": { "nodeId": "cin", "port": "out" }, "to": { "nodeId": "and2", "port": "b" } },
+    { "id": "w9", "from": { "nodeId": "and1", "port": "out" }, "to": { "nodeId": "or", "port": "a" } },
+    { "id": "w10", "from": { "nodeId": "and2", "port": "out" }, "to": { "nodeId": "or", "port": "b" } },
+    { "id": "w11", "from": { "nodeId": "xor2", "port": "out" }, "to": { "nodeId": "sum", "port": "a" } },
+    { "id": "w12", "from": { "nodeId": "or", "port": "out" }, "to": { "nodeId": "cout", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}

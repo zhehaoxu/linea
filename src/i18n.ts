@@ -81,32 +81,15 @@ const MESSAGES = {
   },
   'templates.pin': { zh: '固定弹出框', en: 'Pin panel' },
   'templates.unpin': { zh: '取消固定', en: 'Unpin panel' },
-
-  'template.halfAdder.name': { zh: '半加器', en: 'Half adder' },
-  'template.halfAdder.desc': {
-    zh: '两个输入相加，输出和与进位',
-    en: 'Adds two inputs and outputs sum and carry',
-  },
-  'template.fullAdder.name': { zh: '全加器', en: 'Full adder' },
-  'template.fullAdder.desc': {
-    zh: '带进位输入的一位加法器',
-    en: 'One-bit adder with carry-in',
-  },
-  'template.mux.name': { zh: '2:1 多路选择器', en: '2:1 multiplexer' },
-  'template.mux.desc': {
-    zh: 'S=0 时输出 A，S=1 时输出 B',
-    en: 'Outputs A when S=0 and B when S=1',
-  },
-  'template.srLatch.name': { zh: 'SR 锁存器', en: 'SR latch' },
-  'template.srLatch.desc': {
-    zh: '用两个或非门保存一位状态',
-    en: 'Stores one bit with two NOR gates',
-  },
-  'template.dff.name': { zh: 'D 触发器', en: 'D flip-flop' },
-  'template.dff.desc': {
-    zh: '时钟上升沿锁存输入 D',
-    en: 'Latches input D on the clock rising edge',
-  },
+  'templates.more': { zh: '更多', en: 'More' },
+  'templates.moreTitle': { zh: '更多电路模板', en: 'More circuit templates' },
+  'templates.loading': { zh: '正在加载电路模板…', en: 'Loading circuit templates…' },
+  'templates.loadError': { zh: '电路模板加载失败', en: 'Failed to load circuit templates' },
+  'templates.retry': { zh: '重试', en: 'Retry' },
+  'templates.close': { zh: '关闭', en: 'Close' },
+  'templates.load': { zh: '载入模板', en: 'Load template' },
+  'templates.itemLoading': { zh: '正在载入…', en: 'Loading…' },
+  'templates.itemLoadError': { zh: '载入失败，点击重试', en: 'Load failed, click to retry' },
 
   'language.switch': { zh: '切换到 English', en: 'Switch to 中文' },
 } as const
@@ -166,32 +149,6 @@ const NODE_LABEL_KEYS: Record<NodeType, MessageKey> = {
 
 export function nodeLabel(type: NodeType): string {
   return t(NODE_LABEL_KEYS[type])
-}
-
-const TEMPLATE_NAME_KEYS: Record<string, MessageKey> = {
-  'half-adder': 'template.halfAdder.name',
-  'full-adder': 'template.fullAdder.name',
-  'mux-2-1': 'template.mux.name',
-  'sr-latch': 'template.srLatch.name',
-  'dff-register': 'template.dff.name',
-}
-
-const TEMPLATE_DESC_KEYS: Record<string, MessageKey> = {
-  'half-adder': 'template.halfAdder.desc',
-  'full-adder': 'template.fullAdder.desc',
-  'mux-2-1': 'template.mux.desc',
-  'sr-latch': 'template.srLatch.desc',
-  'dff-register': 'template.dff.desc',
-}
-
-export function templateName(id: string): string {
-  const key = TEMPLATE_NAME_KEYS[id]
-  return key ? t(key) : id
-}
-
-export function templateDescription(id: string): string {
-  const key = TEMPLATE_DESC_KEYS[id]
-  return key ? t(key) : ''
 }
 
 function applyDocumentLocale() {

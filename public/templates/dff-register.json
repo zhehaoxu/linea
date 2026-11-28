@@ -1,0 +1,23 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "d", "type": "switch", "x": 60, "y": 48, "value": 1 },
+    { "id": "clk", "type": "clock", "x": 60, "y": 200, "value": 0, "freq": 1 },
+    { "id": "dff", "type": "dff", "x": 320, "y": 68, "value": 0 },
+    { "id": "q", "type": "lamp", "x": 520, "y": 60, "value": 0 },
+    { "id": "qb", "type": "lamp", "x": 520, "y": 140, "value": 0 },
+    { "id": "label-d", "type": "text", "x": 60, "y": 14, "value": 0, "text": "D" },
+    { "id": "label-clk", "type": "text", "x": 60, "y": 162, "value": 0, "text": "CLK" },
+    { "id": "label-q", "type": "text", "x": 584, "y": 75, "value": 0, "text": "Q" },
+    { "id": "label-qb", "type": "text", "x": 584, "y": 155, "value": 0, "text": "Q'" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "d", "port": "out" }, "to": { "nodeId": "dff", "port": "d" } },
+    { "id": "w2", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "dff", "port": "clk" } },
+    { "id": "w3", "from": { "nodeId": "dff", "port": "q" }, "to": { "nodeId": "q", "port": "a" } },
+    { "id": "w4", "from": { "nodeId": "dff", "port": "qbar" }, "to": { "nodeId": "qb", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}

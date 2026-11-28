@@ -1,0 +1,28 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "clk", "type": "clock", "x": 60, "y": 180, "value": 0, "freq": 1 },
+    { "id": "ff0", "type": "dff", "x": 300, "y": 140, "value": 0 },
+    { "id": "ff1", "type": "dff", "x": 620, "y": 140, "value": 0 },
+    { "id": "not0", "type": "not", "x": 300, "y": 280, "value": 0 },
+    { "id": "not1", "type": "not", "x": 620, "y": 280, "value": 0 },
+    { "id": "q0", "type": "lamp", "x": 920, "y": 220, "value": 0 },
+    { "id": "q1", "type": "lamp", "x": 920, "y": 80, "value": 0 },
+    { "id": "label-clk", "type": "text", "x": 60, "y": 142, "value": 0, "text": "CLK" },
+    { "id": "label-q0", "type": "text", "x": 920, "y": 176, "value": 0, "text": "Q0" },
+    { "id": "label-q1", "type": "text", "x": 920, "y": 36, "value": 0, "text": "Q1" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "ff0", "port": "clk" } },
+    { "id": "w2", "from": { "nodeId": "ff0", "port": "q" }, "to": { "nodeId": "ff1", "port": "clk" } },
+    { "id": "w3", "from": { "nodeId": "ff0", "port": "q" }, "to": { "nodeId": "not0", "port": "a" } },
+    { "id": "w4", "from": { "nodeId": "ff1", "port": "q" }, "to": { "nodeId": "not1", "port": "a" } },
+    { "id": "w5", "from": { "nodeId": "not0", "port": "out" }, "to": { "nodeId": "ff0", "port": "d" } },
+    { "id": "w6", "from": { "nodeId": "not1", "port": "out" }, "to": { "nodeId": "ff1", "port": "d" } },
+    { "id": "w7", "from": { "nodeId": "ff0", "port": "q" }, "to": { "nodeId": "q0", "port": "a" } },
+    { "id": "w8", "from": { "nodeId": "ff1", "port": "q" }, "to": { "nodeId": "q1", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}

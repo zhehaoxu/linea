@@ -1,0 +1,42 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "s1", "type": "switch", "x": 60, "y": 160, "value": 1 },
+    { "id": "s0", "type": "switch", "x": 60, "y": 300, "value": 0 },
+    { "id": "not-s1", "type": "not", "x": 280, "y": 140, "value": 0 },
+    { "id": "not-s0", "type": "not", "x": 280, "y": 280, "value": 0 },
+    { "id": "and-y0", "type": "and", "x": 520, "y": 20, "value": 0 },
+    { "id": "and-y1", "type": "and", "x": 520, "y": 140, "value": 0 },
+    { "id": "and-y2", "type": "and", "x": 520, "y": 260, "value": 0 },
+    { "id": "and-y3", "type": "and", "x": 520, "y": 380, "value": 0 },
+    { "id": "y0", "type": "lamp", "x": 780, "y": 20, "value": 0 },
+    { "id": "y1", "type": "lamp", "x": 780, "y": 140, "value": 0 },
+    { "id": "y2", "type": "lamp", "x": 780, "y": 260, "value": 0 },
+    { "id": "y3", "type": "lamp", "x": 780, "y": 380, "value": 0 },
+    { "id": "label-s1", "type": "text", "x": 60, "y": 126, "value": 0, "text": "S1" },
+    { "id": "label-s0", "type": "text", "x": 60, "y": 266, "value": 0, "text": "S0" },
+    { "id": "label-y0", "type": "text", "x": 780, "y": -14, "value": 0, "text": "Y0" },
+    { "id": "label-y1", "type": "text", "x": 780, "y": 106, "value": 0, "text": "Y1" },
+    { "id": "label-y2", "type": "text", "x": 780, "y": 226, "value": 0, "text": "Y2" },
+    { "id": "label-y3", "type": "text", "x": 780, "y": 346, "value": 0, "text": "Y3" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "s1", "port": "out" }, "to": { "nodeId": "not-s1", "port": "a" } },
+    { "id": "w2", "from": { "nodeId": "s1", "port": "out" }, "to": { "nodeId": "and-y2", "port": "a" } },
+    { "id": "w3", "from": { "nodeId": "s1", "port": "out" }, "to": { "nodeId": "and-y3", "port": "a" } },
+    { "id": "w4", "from": { "nodeId": "s0", "port": "out" }, "to": { "nodeId": "not-s0", "port": "a" } },
+    { "id": "w5", "from": { "nodeId": "s0", "port": "out" }, "to": { "nodeId": "and-y1", "port": "a" } },
+    { "id": "w6", "from": { "nodeId": "s0", "port": "out" }, "to": { "nodeId": "and-y3", "port": "b" } },
+    { "id": "w7", "from": { "nodeId": "not-s1", "port": "out" }, "to": { "nodeId": "and-y0", "port": "a" } },
+    { "id": "w8", "from": { "nodeId": "not-s1", "port": "out" }, "to": { "nodeId": "and-y1", "port": "b" } },
+    { "id": "w9", "from": { "nodeId": "not-s0", "port": "out" }, "to": { "nodeId": "and-y0", "port": "b" } },
+    { "id": "w10", "from": { "nodeId": "not-s0", "port": "out" }, "to": { "nodeId": "and-y2", "port": "b" } },
+    { "id": "w11", "from": { "nodeId": "and-y0", "port": "out" }, "to": { "nodeId": "y0", "port": "a" } },
+    { "id": "w12", "from": { "nodeId": "and-y1", "port": "out" }, "to": { "nodeId": "y1", "port": "a" } },
+    { "id": "w13", "from": { "nodeId": "and-y2", "port": "out" }, "to": { "nodeId": "y2", "port": "a" } },
+    { "id": "w14", "from": { "nodeId": "and-y3", "port": "out" }, "to": { "nodeId": "y3", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}

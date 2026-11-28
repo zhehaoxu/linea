@@ -1,0 +1,112 @@
+[
+  {
+    "id": "half-adder",
+    "file": "half-adder.json",
+    "featured": true,
+    "name": { "zh": "半加器", "en": "Half adder" },
+    "description": {
+      "zh": "两个输入相加，输出和与进位",
+      "en": "Adds two inputs and outputs sum and carry"
+    }
+  },
+  {
+    "id": "full-adder",
+    "file": "full-adder.json",
+    "featured": true,
+    "name": { "zh": "全加器", "en": "Full adder" },
+    "description": {
+      "zh": "带进位输入的一位加法器",
+      "en": "One-bit adder with carry-in"
+    }
+  },
+  {
+    "id": "mux-2-1",
+    "file": "mux-2-1.json",
+    "featured": true,
+    "name": { "zh": "2:1 多路选择器", "en": "2:1 multiplexer" },
+    "description": {
+      "zh": "S=0 时输出 A，S=1 时输出 B",
+      "en": "Outputs A when S=0 and B when S=1"
+    }
+  },
+  {
+    "id": "sr-latch",
+    "file": "sr-latch.json",
+    "featured": true,
+    "name": { "zh": "SR 锁存器", "en": "SR latch" },
+    "description": {
+      "zh": "用两个或非门保存一位状态",
+      "en": "Stores one bit with two NOR gates"
+    }
+  },
+  {
+    "id": "dff-register",
+    "file": "dff-register.json",
+    "featured": true,
+    "name": { "zh": "D 触发器", "en": "D flip-flop" },
+    "description": {
+      "zh": "时钟上升沿锁存输入 D",
+      "en": "Latches input D on the clock rising edge"
+    }
+  },
+  {
+    "id": "mux-4-1",
+    "file": "mux-4-1.json",
+    "featured": false,
+    "name": { "zh": "4:1 多路选择器", "en": "4:1 multiplexer" },
+    "description": {
+      "zh": "用两位选择信号从四路输入中选一路",
+      "en": "Selects one of four inputs with two select signals"
+    }
+  },
+  {
+    "id": "decoder-2-4",
+    "file": "decoder-2-4.json",
+    "featured": false,
+    "name": { "zh": "2–4 译码器", "en": "2-to-4 decoder" },
+    "description": {
+      "zh": "将两位二进制输入转换为四路独热输出",
+      "en": "Converts a two-bit input into four one-hot outputs"
+    }
+  },
+  {
+    "id": "ripple-adder-4",
+    "file": "ripple-adder-4.json",
+    "featured": false,
+    "name": { "zh": "4 位行波加法器", "en": "4-bit ripple adder" },
+    "description": {
+      "zh": "用四个全加器级联实现四位二进制加法",
+      "en": "Adds two four-bit numbers with four cascaded full adders"
+    }
+  },
+  {
+    "id": "shift-register-4",
+    "file": "shift-register-4.json",
+    "featured": false,
+    "name": { "zh": "4 位移位寄存器", "en": "4-bit shift register" },
+    "description": {
+      "zh": "在时钟上升沿将串行输入依次移入寄存器",
+      "en": "Shifts serial input into four stages on each rising edge"
+    }
+  },
+  {
+    "id": "seven-segment-decoder",
+    "file": "seven-segment-decoder.json",
+    "featured": false,
+    "name": { "zh": "七段显示译码器", "en": "Seven-segment decoder" },
+    "description": {
+      "zh": "将 BCD 输入转换为七段数码管段选信号",
+      "en": "Converts a BCD input into seven segment signals"
+    }
+  },
+  {
+    "id": "binary-counter-2",
+    "file": "binary-counter-2.json",
+    "featured": false,
+    "name": { "zh": "2 位二进制计数器", "en": "2-bit binary counter" },
+    "description": {
+      "zh": "用两个 D 触发器构成 00–11 循环计数器",
+      "en": "Counts from 00 to 11 using two D flip-flops"
+    }
+  }
+]

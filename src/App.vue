@@ -6,7 +6,7 @@ import CircuitCanvas from './components/CircuitCanvas.vue'
 import LanguageSwitch from './components/LanguageSwitch.vue'
 import { circuit, clearCircuit, copySelection, cutSelection, duplicateSelection, importCircuit, pasteClipboard, redo, toggleRunning, undo } from './circuit/store'
 import { parseCircuit, serializeCircuit } from './circuit/persist'
-import type { CircuitTemplate } from './circuit/templates'
+import type { LoadedCircuitTemplate } from './circuit/templates'
 import type { BasicNodeType, Vec } from './types'
 
 const canvas = ref<InstanceType<typeof CircuitCanvas> | null>(null)
@@ -25,7 +25,7 @@ function handleClear() {
   clearCircuit()
 }
 
-function handleTemplate(template: CircuitTemplate) {
+function handleTemplate(template: LoadedCircuitTemplate) {
   importCircuit(template.data)
   canvas.value?.fitView()
 }

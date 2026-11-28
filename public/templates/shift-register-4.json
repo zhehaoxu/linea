@@ -1,0 +1,38 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "serial", "type": "switch", "x": 40, "y": 180, "value": 1 },
+    { "id": "clk", "type": "clock", "x": 40, "y": 320, "value": 0, "freq": 1 },
+    { "id": "ff0", "type": "dff", "x": 260, "y": 160, "value": 0 },
+    { "id": "ff1", "type": "dff", "x": 500, "y": 160, "value": 0 },
+    { "id": "ff2", "type": "dff", "x": 740, "y": 160, "value": 0 },
+    { "id": "ff3", "type": "dff", "x": 980, "y": 160, "value": 0 },
+    { "id": "q0", "type": "lamp", "x": 260, "y": 300, "value": 0 },
+    { "id": "q1", "type": "lamp", "x": 500, "y": 300, "value": 0 },
+    { "id": "q2", "type": "lamp", "x": 740, "y": 300, "value": 0 },
+    { "id": "q3", "type": "lamp", "x": 980, "y": 300, "value": 0 },
+    { "id": "label-serial", "type": "text", "x": 40, "y": 146, "value": 0, "text": "DIN" },
+    { "id": "label-clk", "type": "text", "x": 40, "y": 282, "value": 0, "text": "CLK" },
+    { "id": "label-q0", "type": "text", "x": 260, "y": 256, "value": 0, "text": "Q0" },
+    { "id": "label-q1", "type": "text", "x": 500, "y": 256, "value": 0, "text": "Q1" },
+    { "id": "label-q2", "type": "text", "x": 740, "y": 256, "value": 0, "text": "Q2" },
+    { "id": "label-q3", "type": "text", "x": 980, "y": 256, "value": 0, "text": "Q3" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "serial", "port": "out" }, "to": { "nodeId": "ff0", "port": "d" } },
+    { "id": "w2", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "ff0", "port": "clk" } },
+    { "id": "w3", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "ff1", "port": "clk" } },
+    { "id": "w4", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "ff2", "port": "clk" } },
+    { "id": "w5", "from": { "nodeId": "clk", "port": "out" }, "to": { "nodeId": "ff3", "port": "clk" } },
+    { "id": "w6", "from": { "nodeId": "ff0", "port": "q" }, "to": { "nodeId": "ff1", "port": "d" } },
+    { "id": "w7", "from": { "nodeId": "ff1", "port": "q" }, "to": { "nodeId": "ff2", "port": "d" } },
+    { "id": "w8", "from": { "nodeId": "ff2", "port": "q" }, "to": { "nodeId": "ff3", "port": "d" } },
+    { "id": "w9", "from": { "nodeId": "ff0", "port": "q" }, "to": { "nodeId": "q0", "port": "a" } },
+    { "id": "w10", "from": { "nodeId": "ff1", "port": "q" }, "to": { "nodeId": "q1", "port": "a" } },
+    { "id": "w11", "from": { "nodeId": "ff2", "port": "q" }, "to": { "nodeId": "q2", "port": "a" } },
+    { "id": "w12", "from": { "nodeId": "ff3", "port": "q" }, "to": { "nodeId": "q3", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}

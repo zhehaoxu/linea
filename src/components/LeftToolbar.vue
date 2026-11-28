@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import NodeGlyph from './NodeGlyph.vue'
+import TemplateGallery from './TemplateGallery.vue'
 import { circuit } from '../circuit/store'
-import { TEMPLATES, type CircuitTemplate } from '../circuit/templates'
-import { t, templateDescription, templateName, type MessageKey } from '../i18n'
+import {
+  loadTemplateCatalog,
+  loadTemplateData,
+  type CircuitTemplate,
+  type LoadedCircuitTemplate,
+} from '../circuit/templates'
+import { i18n, t, type MessageKey } from '../i18n'
 import type { BasicNodeType, NodeType, Vec } from '../types'
 
 type CategoryKey = 'input' | 'gates' | 'output' | 'sequential'
@@ -59,7 +65,7 @@ const CATEGORIES: Category[] = [
 
 const emit = defineEmits<{
   (e: 'drop', type: BasicNodeType, point: Vec | null): void
-  (e: 'load-template', template: CircuitTemplate): void
+  (e: 'load-template', template: LoadedCircuitTemplate): void
 }>()
 
 const toolbarEl = ref<HTMLElement | null>(null)
@@ -74,9 +80,23 @@ const pinned = reactive<Record<FlyoutKey, boolean>>({
   templates: false,
 })
 const pos = reactive({ left: 0, top: 16 })
+const templates = ref<CircuitTemplate[]>([])
+const templatesLoading = ref(true)
+const templatesError = ref(false)
+const galleryOpen = ref(false)
+const gallery = ref<InstanceType<typeof TemplateGallery> | null>(null)
+type TemplateLoadState = 'idle' | 'loading' | 'error'
+const templateStates = reactive<Record<string, TemplateLoadState>>({})
+const loadingTemplateId = ref<string | null>(null)
+const loadedTemplates = new Map<string, LoadedCircuitTemplate>()
+let activeTemplateController: AbortController | null = null
+let catalogController: AbortController | null = null
+let catalogRequestId = 0
 let anchorRect: DOMRect | null = null
 
 const category = computed(() => CATEGORIES.find(item => item.key === openKey.value) ?? null)
+const featuredTemplates = computed(() => templates.value.filter(template => template.featured))
+const moreTemplates = computed(() => templates.value.filter(template => !template.featured))
 const flyoutTitle = computed(() => {
   if (openKey.value === 'templates') return t('templates.title')
   return category.value ? t(category.value.labelKey) : ''
@@ -124,9 +144,90 @@ function togglePin() {
   pinned[openKey.value] = !pinned[openKey.value]
 }
 
-function loadTemplate(template: CircuitTemplate, ev: MouseEvent) {
-  emit('load-template', template)
-  if (openKey.value && !pinned[openKey.value]) closeFlyout(ev.detail === 0)
+async function reloadTemplates() {
+  catalogController?.abort()
+  const controller = new AbortController()
+  catalogController = controller
+  const requestId = ++catalogRequestId
+  templatesLoading.value = true
+  templatesError.value = false
+  try {
+    const catalog = await loadTemplateCatalog(controller.signal)
+    if (requestId !== catalogRequestId) return
+    templates.value = catalog
+  } catch {
+    if (requestId !== catalogRequestId || controller.signal.aborted) return
+    templates.value = []
+    templatesError.value = true
+  } finally {
+    if (requestId === catalogRequestId) templatesLoading.value = false
+  }
+}
+
+function templateState(template: CircuitTemplate): TemplateLoadState {
+  return templateStates[template.id] ?? 'idle'
+}
+
+function templateStatus(template: CircuitTemplate): string {
+  const state = templateState(template)
+  if (state === 'loading') return t('templates.itemLoading')
+  if (state === 'error') return t('templates.itemLoadError')
+  return ''
+}
+
+async function fetchTemplate(template: CircuitTemplate): Promise<LoadedCircuitTemplate | null> {
+  if (loadingTemplateId.value) return null
+  const cached = loadedTemplates.get(template.id)
+  if (cached) return cached
+
+  const controller = new AbortController()
+  activeTemplateController = controller
+  loadingTemplateId.value = template.id
+  templateStates[template.id] = 'loading'
+  try {
+    const data = await loadTemplateData(template, controller.signal)
+    const loaded = { ...template, data }
+    loadedTemplates.set(template.id, loaded)
+    templateStates[template.id] = 'idle'
+    return loaded
+  } catch {
+    if (!controller.signal.aborted) templateStates[template.id] = 'error'
+    return null
+  } finally {
+    if (activeTemplateController === controller) {
+      activeTemplateController = null
+      loadingTemplateId.value = null
+    }
+  }
+}
+
+async function loadTemplate(template: CircuitTemplate, ev?: MouseEvent) {
+  const loaded = await fetchTemplate(template)
+  if (!loaded) {
+    if (templateState(template) === 'error' && openKey.value === 'templates') {
+      await nextTick()
+      flyoutEl.value
+        ?.querySelector<HTMLButtonElement>(`[data-template-id="${template.id}"]`)
+        ?.focus({ preventScroll: true })
+    }
+    return
+  }
+  emit('load-template', loaded)
+  if (openKey.value && !pinned[openKey.value]) closeFlyout(ev ? ev.detail === 0 : true)
+}
+
+async function loadGalleryTemplate(template: CircuitTemplate) {
+  const loaded = await fetchTemplate(template)
+  if (!loaded) {
+    if (templateState(template) === 'error' && galleryOpen.value) {
+      await nextTick()
+      gallery.value?.focusTemplate(template.id)
+    }
+    return
+  }
+  emit('load-template', loaded)
+  gallery.value?.close()
+  if (openKey.value && !pinned[openKey.value]) closeFlyout(true)
 }
 
 function activateByKeyboard(categoryKey: CategoryKey, type: BasicNodeType, ev: MouseEvent) {
@@ -196,7 +297,7 @@ function onPickUp(ev: PointerEvent) {
 }
 
 function onOutsidePointerDown(ev: PointerEvent) {
-  if (!openKey.value) return
+  if (!openKey.value || galleryOpen.value) return
   if (pinned[openKey.value]) return
   const target = ev.target as Node | null
   if (!target) return
@@ -205,7 +306,7 @@ function onOutsidePointerDown(ev: PointerEvent) {
 }
 
 function onKey(ev: KeyboardEvent) {
-  if (ev.key !== 'Escape' || !openKey.value) return
+  if (ev.key !== 'Escape' || !openKey.value || galleryOpen.value) return
   const target = ev.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .ctx-menu')) {
     return
@@ -222,12 +323,16 @@ function onResize() {
 }
 
 onMounted(() => {
+  void reloadTemplates()
   window.addEventListener('pointerdown', onOutsidePointerDown, true)
   window.addEventListener('keydown', onKey, true)
   window.addEventListener('resize', onResize)
 })
 
 onBeforeUnmount(() => {
+  catalogRequestId += 1
+  catalogController?.abort()
+  activeTemplateController?.abort()
   window.removeEventListener('pointerdown', onOutsidePointerDown, true)
   window.removeEventListener('keydown', onKey, true)
   window.removeEventListener('resize', onResize)
@@ -336,19 +441,60 @@ onBeforeUnmount(() => {
         </button>
       </template>
       <template v-else>
-        <button
-          v-for="template in TEMPLATES"
-          :key="template.id"
-          class="template-item"
-          @click="loadTemplate(template, $event)"
-        >
-          <span class="template-name">{{ templateName(template.id) }}</span>
-          <span class="template-desc">{{ templateDescription(template.id) }}</span>
-        </button>
+        <p v-if="templatesLoading" class="template-status" role="status">{{ t('templates.loading') }}</p>
+        <template v-else-if="templatesError">
+          <p class="template-status" role="alert">{{ t('templates.loadError') }}</p>
+          <button class="templates-retry" @click="reloadTemplates">{{ t('templates.retry') }}</button>
+        </template>
+        <template v-else>
+          <button
+            v-for="template in featuredTemplates"
+            :key="template.id"
+            class="template-item"
+            :data-template-id="template.id"
+            :disabled="loadingTemplateId !== null"
+            :aria-busy="loadingTemplateId === template.id"
+            @click="loadTemplate(template, $event)"
+          >
+            <span class="template-name">{{ template.name[i18n.locale] }}</span>
+            <span class="template-desc">{{ template.description[i18n.locale] }}</span>
+            <span
+              v-if="templateStatus(template)"
+              class="template-action"
+              :class="{ error: templateState(template) === 'error' }"
+              aria-live="polite"
+            >
+              {{ templateStatus(template) }}
+            </span>
+          </button>
+          <button
+            v-if="moreTemplates.length"
+            class="templates-more"
+            aria-haspopup="dialog"
+            :aria-expanded="galleryOpen"
+            aria-controls="template-gallery"
+            @click="galleryOpen = true"
+          >
+            {{ t('templates.more') }}
+          </button>
+        </template>
         <p class="template-note">{{ t('templates.note') }}</p>
       </template>
     </div>
   </Transition>
+
+  <TemplateGallery
+    ref="gallery"
+    :open="galleryOpen"
+    :templates="moreTemplates"
+    :template-states="templateStates"
+    :loading-template-id="loadingTemplateId"
+    :loading="templatesLoading"
+    :error="templatesError"
+    @close="galleryOpen = false"
+    @retry="reloadTemplates"
+    @load-template="loadGalleryTemplate"
+  />
 
   <div v-if="pick" class="pick-ghost" :style="{ left: `${pick.x + 18}px`, top: `${pick.y + 14}px` }">
     <NodeGlyph :type="pick.type" />
@@ -477,6 +623,14 @@ onBeforeUnmount(() => {
   background: #f2f3f7;
 }
 
+.template-item:disabled {
+  cursor: wait;
+}
+
+.template-item:disabled:hover {
+  background: transparent;
+}
+
 .template-name {
   font-size: 12.5px;
   line-height: 1.35;
@@ -494,11 +648,55 @@ onBeforeUnmount(() => {
   color: var(--ink-faint);
 }
 
+.template-action {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--accent-ink);
+}
+
+.template-action.error {
+  color: var(--signal);
+}
+
 .template-note {
   margin: 0;
   padding: 6px 8px 2px;
   font-size: 10.5px;
   color: var(--ink-faint);
+}
+
+.templates-more {
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 9px;
+  font-size: 12px;
+  text-align: center;
+  transition: background 0.12s;
+}
+
+.templates-more:hover {
+  background: var(--accent-line);
+}
+
+.template-status {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.templates-retry {
+  margin: 0 8px 8px;
+  padding: 6px 10px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  font-size: 11.5px;
 }
 
 .flyout-head {

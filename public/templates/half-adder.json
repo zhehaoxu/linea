@@ -1,0 +1,26 @@
+{
+  "type": "linea-circuit",
+  "version": 1,
+  "nodes": [
+    { "id": "a", "type": "switch", "x": 60, "y": 70, "value": 1 },
+    { "id": "b", "type": "switch", "x": 60, "y": 190, "value": 0 },
+    { "id": "xor", "type": "xor", "x": 300, "y": 40, "value": 0 },
+    { "id": "and", "type": "and", "x": 300, "y": 170, "value": 0 },
+    { "id": "sum", "type": "lamp", "x": 510, "y": 50, "value": 0 },
+    { "id": "carry", "type": "lamp", "x": 510, "y": 175, "value": 0 },
+    { "id": "label-a", "type": "text", "x": 60, "y": 16, "value": 0, "text": "A" },
+    { "id": "label-b", "type": "text", "x": 60, "y": 136, "value": 0, "text": "B" },
+    { "id": "label-sum", "type": "text", "x": 510, "y": 8, "value": 0, "text": "Σ" },
+    { "id": "label-carry", "type": "text", "x": 510, "y": 133, "value": 0, "text": "C" }
+  ],
+  "wires": [
+    { "id": "w1", "from": { "nodeId": "a", "port": "out" }, "to": { "nodeId": "xor", "port": "a" } },
+    { "id": "w2", "from": { "nodeId": "a", "port": "out" }, "to": { "nodeId": "and", "port": "a" } },
+    { "id": "w3", "from": { "nodeId": "b", "port": "out" }, "to": { "nodeId": "xor", "port": "b" } },
+    { "id": "w4", "from": { "nodeId": "b", "port": "out" }, "to": { "nodeId": "and", "port": "b" } },
+    { "id": "w5", "from": { "nodeId": "xor", "port": "out" }, "to": { "nodeId": "sum", "port": "a" } },
+    { "id": "w6", "from": { "nodeId": "and", "port": "out" }, "to": { "nodeId": "carry", "port": "a" } }
+  ],
+  "groups": [],
+  "folds": []
+}
